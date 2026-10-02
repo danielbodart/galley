@@ -5,8 +5,9 @@
 //
 //   galley-daemon
 //
-// $GALLEY_SOCKET overrides where it listens, for tests and for a second
-// window beside the first.
+// $GALLEY_SOCKET overrides where it listens, for tests. It does not make a
+// second window: the window is one application on the session bus, and
+// there is one of it there (see below).
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -23,8 +24,13 @@ const socketPath = GLib.getenv('GALLEY_SOCKET') ||
 
 // HANDLES_COMMAND_LINE, so that starting does not emit activate and show the
 // window: a socket-activated window is started by an item arriving, and
-// must not take focus for it. A second galley-daemon hands its command line
-// to the first and exits, leaving the socket with the first.
+// must not take focus for it.
+//
+// Unique, since the notification's "show" reaches the window by its name on
+// the session bus. So a second galley-daemon in the same session would only
+// be a remote of the first, never listening; it says so and fails instead,
+// rather than exiting 0 with a socket systemd handed it unserved, whose
+// clients would wait and then read the hang-up as Cancel.
 const app = new Adw.Application({
     application_id: APP_ID,
     flags: Gio.ApplicationFlags.HANDLES_COMMAND_LINE,
@@ -41,7 +47,8 @@ app.connect('startup', () => {
     window = new QueueWindow(app);
 
     // The one exported action: bringing the window forward. Answers have no
-    // action, so nothing on the session bus can give one.
+    // action, so no action on the session bus can give one; GTK's
+    // accessibility bus could, and the units turn it off (nix/home.nix).
     const show = new Gio.SimpleAction({name: 'show'});
     show.connect('activate', () => window.show(null));
     app.add_action(show);
@@ -68,6 +75,17 @@ app.connect('startup', () => {
 app.connect('shutdown', () => server?.close());
 app.connect('command-line', () => 0);
 app.connect('activate', () => window?.show(null));
+
+try {
+    app.register(null);
+} catch (e) {
+    printerr(`galley: cannot register on the session bus: ${e.message}`);
+    System.exit(1);
+}
+if (app.get_is_remote()) {
+    printerr(`galley: another galley window already runs in this session (${APP_ID} on the session bus); this one would not listen on ${socketPath}`);
+    System.exit(1);
+}
 
 const code = app.run([System.programInvocationName, ...System.programArgs]);
 System.exit(status || code);

@@ -12,14 +12,21 @@
 // the app's "show" action bring it forward, and only a person does those.
 //
 // KEYS ANSWER AT ONCE. There is no delay before a key counts and no second
-// confirmation: what is selected is what the keys act on, and a selection
-// never moves because something arrived. A key held down answers once, not
-// once per repeat.
+// confirmation: what is selected is what the keys act on, so only a person
+// moves the selection. Nothing arriving moves it, and nothing going does
+// either: a selected question withdrawn by its asker -- killed, timed out,
+// tired of waiting -- leaves nothing selected until the person picks again,
+// rather than handing the keys already on their way, an Enter or the rest of
+// a password, to whichever question stood next to it. A key held down
+// answers once, not once per repeat. A focused button is the exception to
+// Enter's default: Enter presses that button, as it would in any dialog.
 //
 // ANSWERS ARE THIS WINDOW'S ALONE. Buttons answer through their own signal
 // handlers, never through a GAction: an application's actions are exported
 // on the session bus, so an "answer" action would let any process there
-// press Allow. The only action is "show".
+// press Allow. The only action is "show". GTK's accessibility bus is the
+// other way in -- it can click any button -- and the units start the window
+// with it off (GTK_A11Y=none; see nix/home.nix).
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -39,6 +46,9 @@ export class QueueWindow {
         this.queue = new Queue();
         this._next = 1;
         this._down = new Set();
+        // Where the selected item was when its asker withdrew it, while
+        // nothing has been picked since; -1 otherwise.
+        this._parkedAt = -1;
         this._build();
     }
 
@@ -88,6 +98,18 @@ export class QueueWindow {
             title: 'Nothing waiting',
             icon_name: 'object-select-symbolic',
         }), 'empty');
+        // In a focusable box, so that the focus has somewhere to rest that
+        // takes no keys: what was being typed into a withdrawn question's
+        // field lands here, and nowhere else. (A status page passes the
+        // focus on to its children, of which it has none that take it.)
+        this.withdrawn = new Gtk.Box({focusable: true});
+        this.withdrawn.append(new Adw.StatusPage({
+            title: 'That question was withdrawn',
+            description: 'Its asker stopped waiting. Pick another with j or k, ↓ or ↑, or a click.',
+            icon_name: 'edit-undo-symbolic',
+            hexpand: true,
+        }));
+        this.stack.add_named(this.withdrawn, 'withdrawn');
 
         const contentView = new Adw.ToolbarView();
         contentView.add_top_bar(new Adw.HeaderBar());
@@ -134,6 +156,8 @@ export class QueueWindow {
         record.page = this._page(record);
 
         const at = this.queue.add(record);
+        if (this._parkedAt >= 0 && at <= this._parkedAt)
+            this._parkedAt++;
         this.list.insert(record.row, at);
         this.list.invalidate_headers();
         this.stack.add_named(record.page, record.id);
@@ -141,15 +165,16 @@ export class QueueWindow {
 
         // Only an empty selection takes the newcomer: one already made is
         // the person's, and moving it is how a key lands on the wrong item.
-        if (!this.list.get_selected_row())
+        // Nor does one left empty by a withdrawal, for the same reason.
+        if (!this.list.get_selected_row() && this._parkedAt < 0)
             this.list.select_row(record.row);
         this._title();
         this._notify();
 
         return {
             append: text => this._append(record, text),
-            timeout: () => this._finish(record, {answer: 'timeout'}),
-            withdraw: () => this._remove(record),
+            timeout: () => this._finish(record, {answer: 'timeout'}, false),
+            withdraw: () => this._remove(record, false),
         };
     }
 
@@ -288,19 +313,24 @@ export class QueueWindow {
         const answer = {answer: spec.answer};
         if (spec.answer === 'extra')
             answer.index = spec.index;
-        this._finish(record, answer);
+        this._finish(record, answer, true);
     }
 
-    _finish(record, answer) {
+    // An item answered: by the person, or else by its timeout.
+    _finish(record, answer, byPerson) {
         if (record.done)
             return;
         if (record.entry && (answer.answer === 'ok' || answer.answer === 'timeout'))
             answer.entry = record.entry.get_text();
         record.respond(answer);
-        this._remove(record);
+        this._remove(record, byPerson);
     }
 
-    _remove(record) {
+    // An item gone. When it was the selected one and the person answered
+    // it, its neighbour takes the selection: the next press is meant for
+    // the next question. When it went any other way, nothing is selected
+    // until the person picks, while the window is up for keys to reach.
+    _remove(record, byPerson) {
         if (record.done)
             return;
         record.done = true;
@@ -318,20 +348,31 @@ export class QueueWindow {
         record.respond = null;
 
         if (this.queue.length === 0) {
+            this._parkedAt = -1;
             this.app.withdraw_notification('waiting');
             this.window.set_visible(false);
+        } else if (wasSelected && !byPerson && this.window.visible) {
+            this._parkedAt = at;
+            this.list.unselect_all();
+            this._selected(null);
         } else if (wasSelected) {
             this.list.select_row(this.queue.at(this.queue.afterRemoval(at)).row);
+        } else if (this._parkedAt > at) {
+            this._parkedAt--;
         }
         this._title();
     }
 
     _selected(row) {
         if (!row) {
-            this.stack.set_visible_child_name('empty');
+            const parked = this._parkedAt >= 0;
+            this.stack.set_visible_child_name(parked ? 'withdrawn' : 'empty');
             this.content.title = 'galley';
+            if (parked)
+                this.withdrawn.grab_focus();
             return;
         }
+        this._parkedAt = -1;
         const record = row._record;
         this.stack.set_visible_child_name(record.id);
         this.content.title = record.item.title || 'Untitled';
@@ -374,6 +415,10 @@ export class QueueWindow {
             this.move(1);
             return true;
         case 'Return': case 'KP_Enter': case 'ISO_Enter':
+            // A button Tab has reached is pressed by Enter itself, as GTK
+            // does: Enter on a focused Refuse must not Allow.
+            if (isButton(this.window.get_focus()))
+                return false;
             if (record && !repeat && record.item.default >= 0)
                 this._press(record, record.item.buttons[record.item.default]);
             return true;
@@ -413,8 +458,14 @@ export class QueueWindow {
         this._down.delete(keyval);
     }
 
+    // One step through the queue. From a withdrawn question's place, down
+    // is the one that took its place and up the one above it.
     move(by) {
-        const at = this.queue.step(this.queue.indexOf(this.current()), by);
+        let at;
+        if (!this.current() && this._parkedAt >= 0)
+            at = by > 0 ? this.queue.afterRemoval(this._parkedAt) : Math.max(0, this._parkedAt - 1);
+        else
+            at = this.queue.step(this.queue.indexOf(this.current()), by);
         if (at >= 0)
             this.list.select_row(this.queue.at(at).row);
     }
@@ -449,7 +500,10 @@ export class QueueWindow {
         notification.set_title(n === 1 ? 'A question is waiting' : `${n} questions are waiting`);
         notification.set_body('Open galley to answer.');
         notification.set_default_action('app.show');
-        notification.set_priority(Gio.NotificationPriority.HIGH);
+        // Urgent, so that Do Not Disturb still shows it and it stays until
+        // dismissed: a caller is blocked until it is answered, and nothing
+        // else on screen says so.
+        notification.set_priority(Gio.NotificationPriority.URGENT);
         this.app.send_notification('waiting', notification);
     }
 
@@ -493,6 +547,8 @@ export class QueueWindow {
         return {
             visible: this.window.visible,
             selected: current?.id ?? null,
+            withdrawn: this._parkedAt >= 0,
+            focus: describe(this.window.get_focus(), current, this.withdrawn),
             items: this.queue.items.map(r => ({
                 id: r.id,
                 kind: r.item.kind,
@@ -504,6 +560,25 @@ export class QueueWindow {
             })),
         };
     }
+}
+
+const isButton = widget => widget instanceof Gtk.Button || widget instanceof Gtk.CheckButton;
+
+// What has the focus, for the end-to-end check: "entry", "row", "button:"
+// and its label, "page" for the withdrawn page, else the widget's type.
+function describe(widget, record, withdrawn) {
+    if (!widget)
+        return '';
+    if (widget instanceof Gtk.ListBoxRow)
+        return 'row';
+    if (widget === withdrawn)
+        return 'page';
+    if (editsText(widget))
+        return 'entry';
+    const i = record?.buttons?.indexOf(widget) ?? -1;
+    if (i >= 0)
+        return `button:${record.item.buttons[i].label}`;
+    return widget.constructor.name;
 }
 
 // An item's icon: a file when the name is a path, else a theme icon.

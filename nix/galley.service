@@ -6,3 +6,6 @@ After=galley.socket graphical-session.target
 
 [Service]
 ExecStart=@daemon@
+# No accessibility bus: any process in the session could press a button
+# through it. Remove this line for a screen reader.
+Environment=GTK_A11Y=none

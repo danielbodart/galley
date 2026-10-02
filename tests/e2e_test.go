@@ -123,9 +123,11 @@ func need(t *testing.T) {
 // ---- the window's test control ----------------------------------------
 
 type state struct {
-	Visible  bool    `json:"visible"`
-	Selected *string `json:"selected"`
-	Items    []struct {
+	Visible   bool    `json:"visible"`
+	Selected  *string `json:"selected"`
+	Withdrawn bool    `json:"withdrawn"`
+	Focus     string  `json:"focus"`
+	Items     []struct {
 		ID      string `json:"id"`
 		Kind    string `json:"kind"`
 		Title   string `json:"title"`
@@ -163,7 +165,15 @@ func current(t *testing.T) state {
 	return s
 }
 
-func press(t *testing.T, key string, extra ...map[string]any) bool {
+// pressed is what became of a key: taken by the window, or else passed to
+// the focused widget ("button", "entry") or to nothing ("").
+type pressed struct {
+	Handled bool   `json:"handled"`
+	To      string `json:"to"`
+	Error   string `json:"error"`
+}
+
+func key(t *testing.T, key string, extra ...map[string]any) pressed {
 	t.Helper()
 	command := map[string]any{"key": key}
 	for _, e := range extra {
@@ -171,15 +181,26 @@ func press(t *testing.T, key string, extra ...map[string]any) bool {
 			command[k] = v
 		}
 	}
-	var r struct {
-		Handled bool   `json:"handled"`
-		Error   string `json:"error"`
-	}
+	var r pressed
 	json.Unmarshal(control(t, command), &r)
 	if r.Error != "" {
 		t.Fatal(r.Error)
 	}
-	return r.Handled
+	return r
+}
+
+func press(t *testing.T, k string, extra ...map[string]any) bool {
+	t.Helper()
+	return key(t, k, extra...).Handled
+}
+
+func focus(t *testing.T, label string) {
+	t.Helper()
+	var r pressed
+	json.Unmarshal(control(t, map[string]any{"focus": label}), &r)
+	if r.Error != "" {
+		t.Fatal(r.Error)
+	}
 }
 
 func waitFor(t *testing.T, what string, ok func(state) bool) state {
@@ -301,6 +322,103 @@ func TestEnterPressesTheDefault(t *testing.T) {
 	waitFor(t, "the question", items(1))
 	press(t, "KP_Enter")
 	no.expect(t, 1, "")
+}
+
+// Tab to Refuse and Enter refuses: the window leaves Enter to a focused
+// button, as any dialog does.
+func TestEnterOnAFocusedButtonPressesIt(t *testing.T) {
+	need(t)
+	start(t, "", "--show").expect(t, 0, "")
+	r := start(t, "", asker("focused")...)
+	waitFor(t, "the question", items(1))
+	focus(t, "Refuse")
+	if s := current(t); s.Focus != "button:Refuse" {
+		t.Fatalf("focus = %q", s.Focus)
+	}
+	if k := key(t, "Return"); k.Handled || k.To != "button" {
+		t.Errorf("Return = %+v", k)
+	}
+	r.expect(t, 1, "")
+}
+
+// The selected question withdrawn by its asker hands nothing on: the keys
+// that were on their way do not answer the question beside it.
+func TestAWithdrawnSelectionIsNotHandedOn(t *testing.T) {
+	need(t)
+	start(t, "", "--show").expect(t, 0, "")
+	first := start(t, "", asker("first")...)
+	waitFor(t, "the first", items(1))
+	second := start(t, "", asker("second")...)
+	s := waitFor(t, "the second", items(2))
+	if *s.Selected != s.Items[0].ID {
+		t.Fatalf("selected %s", *s.Selected)
+	}
+
+	first.cmd.Process.Signal(syscall.SIGTERM)
+	s = waitFor(t, "the first to go", items(1))
+	if s.Selected != nil || !s.Withdrawn || s.Focus != "page" {
+		t.Errorf("after the withdrawal: selected %v, withdrawn %v, focus %q", s.Selected, s.Withdrawn, s.Focus)
+	}
+	press(t, "Return")
+	press(t, "a")
+	time.Sleep(200 * time.Millisecond)
+	second.waiting(t)
+
+	// Down is the question that took its place, chosen.
+	press(t, "Down")
+	if s := current(t); s.Selected == nil || *s.Selected != s.Items[0].ID || s.Withdrawn {
+		t.Errorf("after Down: %+v", s)
+	}
+	press(t, "a")
+	second.expect(t, 0, "")
+}
+
+// A password prompt withdrawn while it is typed into: the rest of the
+// password goes nowhere, not to the buttons of the question below.
+func TestAWithdrawnPasswordKeepsItsKeys(t *testing.T) {
+	need(t)
+	start(t, "", "--show").expect(t, 0, "")
+	sudo := start(t, "", "--entry", "--hide-text", "--title=Authentication Required")
+	waitFor(t, "the prompt", items(1))
+	r := start(t, "", asker("below")...)
+	waitFor(t, "the request", items(2))
+	if s := current(t); s.Focus != "entry" {
+		t.Fatalf("focus = %q", s.Focus)
+	}
+	if k := key(t, "h"); k.Handled || k.To != "entry" {
+		t.Errorf("h = %+v", k)
+	}
+
+	sudo.cmd.Process.Signal(syscall.SIGTERM)
+	if s := waitFor(t, "the prompt to go", items(1)); s.Focus != "page" {
+		t.Errorf("focus = %q", s.Focus)
+	}
+	for _, k := range []string{"a", "s", "r", "Return", "space"} {
+		if p := key(t, k); p.To != "" {
+			t.Errorf("%s went to %q", k, p.To)
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	r.waiting(t)
+
+	press(t, "k")
+	press(t, "r")
+	r.expect(t, 1, "")
+}
+
+func TestASwitchWithNoButtonsCanBeClosed(t *testing.T) {
+	need(t)
+	r := start(t, "", "--question", "--switch")
+	s := waitFor(t, "the question", items(1))
+	if fmt.Sprint(s.Items[0].Buttons) != "[{Close c}]" {
+		t.Errorf("buttons = %v", s.Items[0].Buttons)
+	}
+	// Enter closes nothing, as in zenity.
+	press(t, "Return")
+	time.Sleep(200 * time.Millisecond)
+	r.waiting(t)
+	press(t, "c")
+	r.expect(t, 1, "")
 }
 
 func TestAHeldKeyAnswersOnce(t *testing.T) {

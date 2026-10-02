@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/danielbodart/galley/internal/wire"
 )
@@ -231,13 +233,15 @@ func Parse(argv []string, cwd string) (*Invocation, error) {
 	}
 
 	item := wire.Item{Kind: kind, Default: -1}
-	item.Title = given["title"]
+	item.Title = clip(given["title"], maxTitle)
 	if !set["title"] {
 		item.Title = defaultTitle[kind]
 	}
 	inv.Timeout = atoi(given["timeout"])
-	item.Width = atoi(given["width"])
-	item.Height = atoi(given["height"])
+	// zenity takes any size and GTK makes what it can of it; the window
+	// takes -1 (none) to 100000, so a size beyond either end is that end.
+	item.Width = clamp(atoi(given["width"]), -1, maxSize)
+	item.Height = clamp(atoi(given["height"]), -1, maxSize)
 
 	text, hasText := given["text"], set["text"]
 	switch kind {
@@ -268,7 +272,7 @@ func Parse(argv []string, cwd string) (*Invocation, error) {
 		// zenity's text-info has no --text: it is read and ignored.
 		item.Icon = defaultIcon[kind]
 		item.NoWrap = set["no-wrap"]
-		item.Info = &wire.Info{Checkbox: given["checkbox"], AutoScroll: set["auto-scroll"]}
+		item.Info = &wire.Info{Checkbox: clip(given["checkbox"], maxCheckbox), AutoScroll: set["auto-scroll"]}
 		inv.Filename = given["filename"]
 	}
 
@@ -284,6 +288,13 @@ func Parse(argv []string, cwd string) (*Invocation, error) {
 			if set["default-cancel"] {
 				item.Default = 0
 			}
+		} else if len(inv.Extra) == 0 {
+			// A --switch with no buttons at all is still closed in zenity,
+			// by Escape or the window's close button, and exits as Escape.
+			// Escape only hides galley's window, so the item gets a button
+			// that does what zenity's closing does. Not the default: Enter
+			// closes nothing in zenity's either.
+			spec = append(spec, wire.Button{Answer: wire.AnswerClose, Label: "_Close"})
 		}
 	case wire.KindInfo, wire.KindWarning, wire.KindError:
 		spec = append(spec, wire.Button{Answer: wire.AnswerOK, Label: or(set["ok-label"], ok, "_OK")})
@@ -297,7 +308,16 @@ func Parse(argv []string, cwd string) (*Invocation, error) {
 	for i, label := range inv.Extra {
 		spec = append(spec, wire.Button{Answer: wire.AnswerExtra, Index: i, Label: label})
 	}
+	if len(spec) > maxButtons {
+		return nil, &Error{fmt.Sprintf("galley shows at most %d buttons, and this dialog would have %d", maxButtons, len(spec))}
+	}
 	item.Buttons = Buttons(spec)
+	for i, b := range item.Buttons {
+		item.Buttons[i].Label = clip(b.Label, maxLabel)
+		if b.Underline >= utf8.RuneCountInString(item.Buttons[i].Label) {
+			item.Buttons[i].Underline = -1
+		}
+	}
 	inv.Item = item
 	return inv, nil
 }
@@ -363,6 +383,39 @@ func icon(name, kind, cwd string) string {
 		return filepath.Join(cwd, name)
 	}
 	return name
+}
+
+// What the window takes of an item (daemon/validate.js), in UTF-16 code
+// units for text, as JavaScript counts a string's length. zenity has no
+// such limits; what is longer is cut short here, with an ellipsis, rather
+// than refused there. An extra button's label is printed as it was given,
+// whatever is shown.
+const (
+	maxTitle    = 1024
+	maxLabel    = 256
+	maxCheckbox = 1024
+	maxButtons  = 16
+	maxSize     = 100000
+)
+
+// clip cuts s to at most max UTF-16 code units, the last of them an
+// ellipsis when anything was cut.
+func clip(s string, max int) string {
+	if len(utf16.Encode([]rune(s))) <= max {
+		return s
+	}
+	n := 0
+	for i, r := range s {
+		if n+utf16.RuneLen(r) > max-1 {
+			return s[:i] + "…"
+		}
+		n += utf16.RuneLen(r)
+	}
+	return s
+}
+
+func clamp(n, lo, hi int) int {
+	return min(max(n, lo), hi)
 }
 
 func or(given bool, value, fallback string) string {

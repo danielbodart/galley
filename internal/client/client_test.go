@@ -135,6 +135,8 @@ func TestEachAnswerExitsAndPrintsAsZenity(t *testing.T) {
 		{"question timeout", asker, wire.Answer{Answer: wire.AnswerTimeout}, 5, ""},
 		{"approve", []string{"--text-info", "--filename=/dev/null"}, wire.Answer{Answer: wire.AnswerOK}, 0, ""},
 		{"info", []string{"--info"}, wire.Answer{Answer: wire.AnswerOK}, 0, ""},
+		// zenity's Escape, which a --switch with no buttons closes by.
+		{"close", []string{"--question", "--switch"}, wire.Answer{Answer: wire.AnswerClose}, 1, ""},
 		{"unknown answer", asker, wire.Answer{Answer: "maybe"}, 255, ""},
 		{"extra out of range", asker, wire.Answer{Answer: wire.AnswerExtra, Index: 3}, 255, ""},
 	} {
@@ -166,6 +168,10 @@ func TestEnvironmentOverridesExitCodes(t *testing.T) {
 	w := newWindow(t, answering(wire.Answer{Answer: wire.AnswerCancel}))
 	if got := w.run("", map[string]string{"ZENITY_CANCEL": "7"}, asker...); got.code != 7 {
 		t.Errorf("code = %d", got.code)
+	}
+	w = newWindow(t, answering(wire.Answer{Answer: wire.AnswerClose}))
+	if got := w.run("", map[string]string{"ZENITY_CANCEL": "7", "ZENITY_ESC": "3"}, "--question", "--switch"); got.code != 3 {
+		t.Errorf("close code = %d", got.code)
 	}
 }
 

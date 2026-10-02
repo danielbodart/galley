@@ -60,7 +60,10 @@ the window is not the one in front, a notification says something is
 waiting; the window is not raised for it. A dialog that appears under the
 cursor is answered by whatever key was on its way -- the Enter that ends a
 command in a terminal -- and these questions exist for the presses that are
-meant. Bring it forward with the notification, or with `galley --show` on a
+meant. The notification is urgent, so GNOME shows it under Do Not Disturb
+too and keeps it until it is dismissed or the window comes forward; it is
+the only cue, as there is no tray count. Bring it forward with the
+notification, or with `galley --show` on a
 keyboard shortcut (GNOME: *Settings → Keyboard → Custom Shortcuts*). Under
 Wayland a window may only take focus with an activation token; `--show` passes
 on the one it was started with (`XDG_ACTIVATION_TOKEN`), and without one GNOME
@@ -69,16 +72,21 @@ may say the window is ready rather than raise it.
 | key | |
 |---|---|
 | `j` / `k`, `↓` / `↑` | move through the queue |
-| `Enter` | the default button: OK, Yes or Allow, or Cancel with `--default-cancel` |
+| `Enter` | the default button: OK, Yes or Allow, or Cancel with `--default-cancel`; or the focused button, once `Tab` has reached one |
 | a button's letter | that button: the label's mnemonic (`_Allow` is `a`), else its first letter no other button has; underlined on the button |
 | `Alt` + letter | the same, while typing in a field |
 | `Page Up` / `Page Down` | scroll the selected question |
 | `Escape` | hide the window; nothing is answered |
 
 Keys answer at once: there is no delay before they count and no second
-confirmation. What is selected is what they act on, and the selection never
-moves because something arrived; a key held down answers one question, not
-one per repeat. `j` and `k` are never a button's.
+confirmation. What is selected is what they act on, so only you move the
+selection. Nothing arriving moves it, and nothing going does either: when
+the selected question is withdrawn -- its asker killed, timed out or tired of
+waiting -- nothing is selected until you pick again with `j`, `k`, an arrow
+or a click (`↓` is the question that took its place), so an Enter or the
+rest of a password on its way lands nowhere rather than on the question
+beside it. A key held down answers one question, not one per repeat. `j` and
+`k` are never a button's.
 
 Questions are grouped by `--title` -- frisket's are all "Allow this
 request?", sudo's "Authentication Required" -- newest at the bottom, each
@@ -89,12 +97,13 @@ stops waiting, takes its question with it.
 
 | | |
 |---|---|
-| **Dialogs** | `--question` (with `--switch`), `--info`, `--warning`, `--error`, `--entry`, `--text-info` |
+| **Dialogs** | `--question` (with `--switch`; with no `--extra-button` it gets a Close button, which exits as zenity's Escape does), `--info`, `--warning`, `--error`, `--entry`, `--text-info` |
 | **Options** | `--title`, `--text`, `--ok-label`, `--cancel-label`, `--extra-button` (repeatable), `--timeout`, `--width`, `--height`, `--icon`, `--no-markup`, `--no-wrap`, `--ellipsize`, `--default-cancel`, `--entry-text`, `--hide-text`, `--filename` (else stdin, read as it arrives), `--checkbox`, `--auto-scroll` |
 | **Exits** | 0 OK, 1 Cancel, 1 and the label on stdout for an extra button, 5 timed out, 255 a command-line error; `ZENITY_OK` / `DIALOG_OK` and the rest override each, as in zenity |
 | **Text** | As zenity 4.2 treats it: a message's `--text` has GLib's escapes undone (`\n`, `\t`, octal) and is markup, unless `--no-markup`, when it is taken as it is; an entry's `--text` has its escapes undone and is a mnemonic label (`__` is `_`); an entry's text is printed on OK and on timeout |
+| **Fitted** | what zenity takes and the window holds less of: a `--width` or `--height` beyond -1 to 100000 is that end of it; a `--title` or `--checkbox` over 1024 characters, or a button's label over 256, is cut short with an ellipsis (an extra button still prints its label whole) |
 | **Accepted, ignored** | every other zenity option, with any dialog, as zenity accepts them -- `--modal`, `--attach`, `--window-icon`, `--font`, … -- except where zenity itself refuses one for a dialog |
-| **Refused** | the dialogs that do not stack (`--list`, `--forms`, `--progress`, `--file-selection`, `--calendar`, …), `--editable`, `--html`, `--url`, and an `--entry` given a list of values; each says so and exits 255 |
+| **Refused** | the dialogs that do not stack (`--list`, `--forms`, `--progress`, `--file-selection`, `--calendar`, …), `--editable`, `--html`, `--url`, an `--entry` given a list of values, and more than 16 buttons; each says so and exits 255 |
 | **No window** | when the window cannot be reached, galley exits 1 having said why, as zenity does when GTK has no display |
 
 `zenity --version` through the `zenity` name prints the zenity version whose
@@ -130,7 +139,10 @@ window only draws.
 - **Answers are not on D-Bus.** galley is a GApplication, and a
   GApplication's actions are exported on the session bus, so buttons answer
   through their own signal handlers and no action answers anything. The one
-  action is `show`.
+  action is `show`. GTK's accessibility bus could press a button too, so
+  the units start the window with it off (`GTK_A11Y=none`) unless
+  `services.galley.accessibility` is set; a window started by hand has it
+  on.
 - **Caller text is text.** Titles, bodies, labels and files are set as plain
   text. Where zenity reads `--text` as markup, galley parses it with Pango
   and keeps only emphasis -- bold, italic, underline, strikethrough,
@@ -146,9 +158,9 @@ window only draws.
   as frisket and sudo, about what a sandbox does. Give a sandbox the socket
   and it can put any question it likes in front of you.
 - **Everything else in the session can.** Any process running as you can
-  connect, as it could run zenity. And GTK's accessibility bus lets such a
-  process press buttons in any window, galley's included; that is the
-  desktop's boundary, not galley's.
+  connect, as it could run zenity. And GTK's accessibility bus, where it is
+  on, lets such a process press buttons in any window; galley's is off it
+  unless asked for, the rest of the desktop's is the desktop's boundary.
 - **The test control is not shipped.** The end-to-end check presses keys
   through `daemon/test-control.js`; the package leaves that file out.
 
@@ -159,10 +171,13 @@ window only draws.
 | `services.galley.enable` | `false` | The socket, and the window it starts. |
 | `services.galley.package` | this flake's `galley` | The client and the window. |
 | `services.galley.zenity` | `false` | Also put galley on `PATH` as `zenity`. Collides with a real zenity in `home.packages`. |
+| `services.galley.accessibility` | `false` | Leave GTK's accessibility bus on for the window, as a screen reader needs. |
 
 Packages: `galley` (`bin/galley`, `bin/galley-daemon`) and `galley-zenity`
 (`bin/zenity`). `$GALLEY_SOCKET` overrides the socket's path for the client
-and the window, for tests and a second window.
+and the window, for tests. It does not make a second window: the window is
+one application on the session bus, and a second `galley-daemon` in the
+same session says so and exits 1 rather than leave its socket unserved.
 
 ## Development
 
@@ -179,7 +194,11 @@ $ nix flake check      # build, client tests, vet, gofmt, the window's units,
 
 The end-to-end test runs the real window on broadway, which needs no
 display, and never touches the desktop it runs on: it drops
-`WAYLAND_DISPLAY`, `DISPLAY` and the session bus first.
+`WAYLAND_DISPLAY`, `DISPLAY` and the session bus first. Its keys reach the
+window's own handler through the test control; what GTK does with a key the
+window leaves -- Enter on a focused button, a character in a field -- the
+control imitates rather than tests, since GTK 4 has no way to synthesise a
+key event.
 
 ## Licence
 

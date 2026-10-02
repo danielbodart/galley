@@ -115,6 +115,8 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
         ['question', 'Allow this request?', 1, 3, undefined]);
     check('an entry has its field', validate({kind: 'entry', buttons: [], entry: {hidden: true}}).entry,
         {text: '', hidden: true});
+    check('a switch closes', validate({kind: 'question', buttons: [{answer: 'close', label: 'Close'}]}).buttons[0].answer,
+        'close');
 
     const bad = (name, change, pattern) =>
         throws(name, () => validate({...good, ...change}), pattern);

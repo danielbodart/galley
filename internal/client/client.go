@@ -274,6 +274,8 @@ func answered(inv *zenity.Invocation, a wire.Answer, env Env) int {
 		return zenity.Code(zenity.OK, env.Getenv)
 	case wire.AnswerCancel:
 		return zenity.Code(zenity.Cancel, env.Getenv)
+	case wire.AnswerClose:
+		return zenity.Code(zenity.Esc, env.Getenv)
 	case wire.AnswerTimeout:
 		entry()
 		return zenity.Code(zenity.Timeout, env.Getenv)

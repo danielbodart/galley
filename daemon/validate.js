@@ -4,9 +4,13 @@
 // write to the socket, so an item is read the way any input is: each field
 // its expected type and within a size, everything else dropped. What comes
 // back is a fresh object holding only the fields the window reads.
+//
+// The client fits zenity's command line to these limits before it sends --
+// sizes clamped, titles and labels cut short, more than 16 buttons refused
+// (internal/zenity/args.go) -- so only an item written by hand meets them.
 
 const KINDS = new Set(['question', 'info', 'warning', 'error', 'entry', 'text']);
-const ANSWERS = new Set(['ok', 'cancel', 'extra']);
+const ANSWERS = new Set(['ok', 'cancel', 'extra', 'close']);
 
 function string(value, name, max, fallback = '') {
     if (value === undefined || value === null)

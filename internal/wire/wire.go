@@ -65,8 +65,8 @@ type Item struct {
 
 // Button is one of an item's answers.
 type Button struct {
-	// Answer is what pressing it answers: AnswerOK, AnswerCancel or
-	// AnswerExtra, with Index naming which extra button.
+	// Answer is what pressing it answers: AnswerOK, AnswerCancel,
+	// AnswerClose or AnswerExtra, with Index naming which extra button.
 	Answer string `json:"answer"`
 	Index  int    `json:"index,omitempty"`
 	// Label is the text shown, its mnemonic underscores already removed.
@@ -107,6 +107,8 @@ const (
 	AnswerCancel  = "cancel"
 	AnswerExtra   = "extra"
 	AnswerTimeout = "timeout"
+	// AnswerClose is zenity's Escape: the dialog closed with no button.
+	AnswerClose = "close"
 )
 
 // Answer is the window's only line to an item's client. Entry carries an

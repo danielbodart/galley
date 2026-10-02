@@ -36,6 +36,17 @@ in
         store path, as `lib.getExe pkgs.zenity` does, is not affected.
       '';
     };
+
+    accessibility = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Let the window be read and worked through GTK's accessibility bus,
+        as a screen reader needs. Off, the window starts with GTK_A11Y=none:
+        that bus is open to any process in the session, and through it
+        such a process could press Allow on a question it asked itself.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -58,7 +69,11 @@ in
         Requires = [ "galley.socket" ];
         After = [ "galley.socket" "graphical-session.target" ];
       };
-      Service.ExecStart = "${cfg.package}/bin/galley-daemon";
+      Service = {
+        ExecStart = "${cfg.package}/bin/galley-daemon";
+      } // lib.optionalAttrs (!cfg.accessibility) {
+        Environment = [ "GTK_A11Y=none" ];
+      };
     };
   };
 }

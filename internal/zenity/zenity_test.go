@@ -190,6 +190,8 @@ func TestDefaultsAreZenitys(t *testing.T) {
 		{[]string{"--info", "--text", `<b>a</b>\tb`}, "Information", "<b>a</b>\tb", "OK", "OK", true, false},
 		// --switch has only the extra buttons, and so no default.
 		{[]string{"--question", "--switch", "--extra-button", "One", "--extra-button", "Two"}, "Question", "Are you sure you want to proceed?", "One,Two", "", false, false},
+		// And with none, a Close that does what closing zenity's does.
+		{[]string{"--question", "--switch"}, "Question", "Are you sure you want to proceed?", "Close", "", false, false},
 	} {
 		inv, err := Parse(c.args, "/")
 		if err != nil {
@@ -258,11 +260,58 @@ func TestRefusals(t *testing.T) {
 		{[]string{"--text-info", "--editable"}, "--editable is not supported by galley"},
 		{[]string{"--text-info", "--html"}, "--html is not supported by galley"},
 		{[]string{"--entry", "a", "b"}, "--entry with a list of values is not supported by galley"},
+		{append([]string{"--question"}, repeat("--extra-button=x", 15)...), "galley shows at most 16 buttons, and this dialog would have 17"},
 	} {
 		_, err := Parse(c.args, "/")
 		if err == nil || !strings.HasPrefix(err.Error(), c.want) {
 			t.Errorf("%q: got %v, want %q", c.args, err, c.want)
 		}
+	}
+}
+
+func repeat(s string, n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = s
+	}
+	return out
+}
+
+// What zenity takes and the window would not is made to fit, not refused.
+func TestWhatTheWindowWouldRefuseIsFitted(t *testing.T) {
+	long := strings.Repeat("é", 2000)
+	inv, err := Parse([]string{"--question", "--width=-5", "--height=200000", "--title=" + long,
+		"--ok-label=" + long, "--extra-button=" + long + "😀"}, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := inv.Item
+	if item.Width != -1 || item.Height != 100000 {
+		t.Errorf("size = %d x %d", item.Width, item.Height)
+	}
+	if item.Title != strings.Repeat("é", 1023)+"…" {
+		t.Errorf("title is %d runes", len([]rune(item.Title)))
+	}
+	for _, b := range item.Buttons[1:] {
+		if b.Label != strings.Repeat("é", 255)+"…" {
+			t.Errorf("label is %d runes", len([]rune(b.Label)))
+		}
+	}
+	// What is printed is what was given.
+	if inv.Extra[0] != long+"😀" {
+		t.Errorf("extra is %d runes", len([]rune(inv.Extra[0])))
+	}
+	// A character of two UTF-16 units is not cut in half.
+	if got := clip("ab😀", 3); got != "ab…" {
+		t.Errorf("clip = %q", got)
+	}
+	if got := clip("ab😀", 4); got != "ab😀" {
+		t.Errorf("clip = %q", got)
+	}
+	// A mark beyond the cut underlines nothing, but its key still presses.
+	inv, _ = Parse([]string{"--info", "--ok-label=" + strings.Repeat("-", 300) + "_x"}, "/")
+	if b := inv.Item.Buttons[0]; b.Key != "x" || b.Underline != -1 {
+		t.Errorf("button = %+v", b)
 	}
 }
 
