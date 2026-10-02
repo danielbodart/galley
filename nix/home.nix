@@ -69,6 +69,10 @@ in
         Requires = [ "galley.socket" ];
         After = [ "galley.socket" "graphical-session.target" ];
       };
+      # Nothing else of the environment is set or dropped: the window takes
+      # the user manager's, which GNOME fills from the session's, and with it
+      # the session bus, where the settings portal tells libadwaita the
+      # desktop's dark style, accent colour and contrast.
       Service = {
         ExecStart = "${cfg.package}/bin/galley-daemon";
       } // lib.optionalAttrs (!cfg.accessibility) {

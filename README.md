@@ -93,6 +93,12 @@ request?", sudo's "Authentication Required" -- newest at the bottom, each
 showing how long it has waited. A client that is killed, or whose caller
 stops waiting, takes its question with it.
 
+It looks as the desktop does: libadwaita's dark or light style, GNOME's
+accent colour and high contrast, followed as they change while the window is
+open. They reach it as they reach any libadwaita application, through the
+settings portal on the session bus, which the units leave as the session
+set it; galley forces no colour scheme and draws no colours of its own.
+
 ## Compatibility
 
 | | |
@@ -185,16 +191,20 @@ same session says so and exits 1 rather than leave its socket unserved.
 $ nix develop          # go, gjs, gtk4, libadwaita
 $ go test ./...
 $ gjs -m tests/units.js
+$ gjs -m tests/appearance.js   # the window following the desktop's style
 $ GALLEY_E2E_DAEMON="gjs -m $PWD/daemon/main.js" \
   GALLEY_E2E_BROADWAYD=$(command -v gtk4-broadwayd) go test -v ./tests/
 $ nix flake check      # build, client tests, vet, gofmt, the window's units,
-                       # the end-to-end test on GTK's broadway backend, and
+                       # the end-to-end test on GTK's broadway backend, the
+                       # appearance test, and
                        # the home-manager module's units
 ```
 
-The end-to-end test runs the real window on broadway, which needs no
-display, and never touches the desktop it runs on: it drops
-`WAYLAND_DISPLAY`, `DISPLAY` and the session bus first. Its keys reach the
+The end-to-end and appearance tests run the real window on broadway, which
+needs no display, and never touch the desktop they run on: they drop
+`WAYLAND_DISPLAY`, `DISPLAY` and the session bus first. The appearance test
+runs its own session bus, with a stand-in for the settings portal, and keeps
+its GSettings in a keyfile of its own. The end-to-end test's keys reach the
 window's own handler through the test control; what GTK does with a key the
 window leaves -- Enter on a focused button, a character in a field -- the
 control imitates rather than tests, since GTK 4 has no way to synthesise a

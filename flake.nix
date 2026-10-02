@@ -103,7 +103,7 @@
         let pkgs = nixpkgs.legacyPackages.${system}; in
         {
           default = pkgs.mkShell {
-            packages = [ pkgs.go pkgs.gopls pkgs.gtk4 ] ++ windowInputs pkgs;
+            packages = [ pkgs.go pkgs.gopls pkgs.gtk4 pkgs.dbus ] ++ windowInputs pkgs;
             nativeBuildInputs = [ pkgs.gobject-introspection ];
             CGO_ENABLED = "0";
           };
@@ -152,6 +152,31 @@
             ''
               cd ${./.}
               gjs -m tests/units.js
+              touch $out
+            '';
+
+          # The window follows the desktop's dark style, accent colour and
+          # high contrast, at start and as they change while it is open, by
+          # the settings portal and by GSettings: the real window on
+          # broadway and a private session bus, with a stand-in portal. And
+          # the package's window finds the desktop's settings: its wrapper
+          # carries the schemas and dconf's GSettings backend.
+          appearance = pkgs.runCommand "galley-appearance"
+            {
+              nativeBuildInputs = [ pkgs.gjs pkgs.gobject-introspection pkgs.gtk4 pkgs.dbus ];
+              buildInputs = windowInputs pkgs;
+              GSETTINGS_SCHEMA_DIR = "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}/glib-2.0/schemas";
+            }
+            ''
+              export HOME=$TMPDIR
+              cd ${./.}
+              gjs -m tests/appearance.js
+              for want in gsettings-desktop-schemas dconf; do
+                grep -q "$want" ${pkg}/bin/galley-daemon || {
+                  echo "galley-daemon's wrapper has no $want" >&2
+                  exit 1
+                }
+              done
               touch $out
             '';
 

@@ -19,6 +19,7 @@ jobs:
 
       # The build and the client's tests, vet and gofmt, the window's own
       # units under gjs, the end-to-end test on GTK's broadway backend (no
-      # display needed), and the home-manager module's units.
+      # display needed), the window following the desktop's dark style, accent
+      # and contrast, and the home-manager module's units.
       - name: nix flake check
         run: nix flake check --print-build-logs

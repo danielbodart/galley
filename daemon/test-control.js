@@ -10,6 +10,9 @@
 //   {"focus": "Refuse"}      -> the selected item's button of that label
 //                               focused, as Tab would
 //   {"show": true}           -> the window brought forward
+//   {"appearance": true}     -> what libadwaita's style manager has made of
+//                               the desktop's settings: dark, accent colour
+//                               and high contrast
 //
 // A key goes to the window's own handler first, as GTK's capture phase
 // sends it. One the window leaves is passed on the way GTK would pass it to
@@ -26,6 +29,7 @@ import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Gdk from 'gi://Gdk?version=4.0';
 import Gtk from 'gi://Gtk?version=4.0';
+import Adw from 'gi://Adw?version=1';
 
 Gio._promisify(Gio.DataInputStream.prototype, 'read_line_async', 'read_line_finish_utf8');
 
@@ -58,6 +62,19 @@ function passOn(focus, keyval, name) {
     return '';
 }
 
+// The style manager's view of the desktop, by the enums' names.
+function appearance() {
+    const style = Adw.StyleManager.get_default();
+    const name = (e, v) => Object.keys(e).find(k => e[k] === v)?.toLowerCase() ?? String(v);
+    return {
+        colorScheme: name(Adw.ColorScheme, style.color_scheme),
+        dark: style.dark,
+        highContrast: style.high_contrast,
+        accent: name(Adw.AccentColor, style.accent_color),
+        systemAccents: style.system_supports_accent_colors,
+    };
+}
+
 async function serve(window, connection) {
     const input = new Gio.DataInputStream({base_stream: connection.get_input_stream()});
     const [line] = await input.read_line_async(GLib.PRIORITY_DEFAULT, null);
@@ -88,6 +105,8 @@ async function serve(window, connection) {
                 throw new Error(`the button ${JSON.stringify(command.focus)} cannot take the focus`);
         } else if (command.show) {
             window.show(null);
+        } else if (command.appearance) {
+            reply = appearance();
         }
     } catch (e) {
         reply = {error: e.message};
