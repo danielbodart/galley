@@ -1,0 +1,12 @@
+# galley's socket. A client connecting starts the window (galley.service);
+# the directory is made private, so only this user can reach the socket.
+[Unit]
+Description=galley's question queue (socket)
+
+[Socket]
+ListenStream=%t/galley/sock
+SocketMode=0600
+DirectoryMode=0700
+
+[Install]
+WantedBy=sockets.target

@@ -1,0 +1,64 @@
+# galley's window as a socket-activated user service, for home-manager.
+#
+# The socket is always there; the window starts on the first question and
+# stays, holding the queue, until the session ends. Nothing here puts galley
+# where zenity was: a caller names galley, or `zenity` is set to put it on
+# PATH under that name.
+self:
+{ config, lib, pkgs, ... }:
+
+let
+  cfg = config.services.galley;
+
+  zenity = pkgs.runCommand "galley-zenity" { } ''
+    mkdir -p $out/bin
+    ln -s ${lib.getExe cfg.package} $out/bin/zenity
+  '';
+in
+{
+  options.services.galley = {
+    enable = lib.mkEnableOption "galley, a zenity drop-in whose dialogs stack in one window";
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.galley;
+      defaultText = lib.literalExpression "galley.packages.\${system}.galley";
+      description = "The galley package: the `galley` client and the window it talks to.";
+    };
+
+    zenity = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Also put galley on PATH as `zenity`, so that anything calling zenity
+        by name stacks its dialogs in galley's window instead. It collides
+        with a real zenity in home.packages; a caller that names zenity's
+        store path, as `lib.getExe pkgs.zenity` does, is not affected.
+      '';
+    };
+  };
+
+  config = lib.mkIf cfg.enable {
+    home.packages = [ cfg.package ] ++ lib.optional cfg.zenity zenity;
+
+    systemd.user.sockets.galley = {
+      Unit.Description = "galley's question queue (socket)";
+      Socket = {
+        ListenStream = "%t/galley/sock";
+        SocketMode = "0600";
+        # The socket's privacy is its directory's: a password goes down it.
+        DirectoryMode = "0700";
+      };
+      Install.WantedBy = [ "sockets.target" ];
+    };
+
+    systemd.user.services.galley = {
+      Unit = {
+        Description = "galley's question queue";
+        Requires = [ "galley.socket" ];
+        After = [ "galley.socket" "graphical-session.target" ];
+      };
+      Service.ExecStart = "${cfg.package}/bin/galley-daemon";
+    };
+  };
+}

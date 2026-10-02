@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=galley
+Comment=Questions waiting to be answered
+Exec=@galley@ --show
+Icon=dialog-question
+Terminal=false
+Categories=Utility;
+NoDisplay=true

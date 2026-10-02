@@ -1,0 +1,8 @@
+# galley's window, started by its socket on the first question.
+[Unit]
+Description=galley's question queue
+Requires=galley.socket
+After=galley.socket graphical-session.target
+
+[Service]
+ExecStart=@daemon@

@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # The build and the client's tests, vet and gofmt, the window's own
+      # units under gjs, the end-to-end test on GTK's broadway backend (no
+      # display needed), and the home-manager module's units.
+      - name: nix flake check
+        run: nix flake check --print-build-logs
