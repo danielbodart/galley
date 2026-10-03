@@ -8,7 +8,7 @@
 import GLib from 'gi://GLib';
 import System from 'system';
 
-import {Queue, waited} from '../daemon/queue.js';
+import {Queue, waited, sameness} from '../daemon/queue.js';
 import {render, lines, buttonMarkup} from '../daemon/render.js';
 import {validate, rows, progressUpdate, notify} from '../daemon/validate.js';
 import {formatDate} from '../daemon/dates.js';
@@ -176,6 +176,47 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
         {finished: false, closed: true, percentage: 50, text: '<b>x</b>'});
     throws('a progress update past 100', () => progressUpdate({percentage: 200}), /percentage/);
     check('a notification', notify({text: 'hi', icon: 'x', extra: 1}), {text: 'hi', icon: 'x'});
+}
+
+// ---- the same question -------------------------------------------------------
+
+{
+    const v2 = raw => validate(raw, 2);
+    const ask = {
+        kind: 'question', title: 'Allow this request?', text: 'GET /', width: 640, icon: 'security-medium',
+        buttons: [{answer: 'cancel', label: 'Refuse', key: 'r'}, {answer: 'ok', label: 'Allow', key: 'a'}],
+    };
+    const key = raw => sameness(v2(raw));
+    // The whole item, as validate() makes it: fields it does not keep make
+    // no difference, any it keeps does.
+    check('the same question', key(ask), key({...ask}));
+    check('what validate drops', key({...ask, unknown: 'x', timeout: 5}), key(ask));
+    check('fields in another order', key({buttons: ask.buttons, ...ask, kind: 'question'}), key(ask));
+    const differs = (name, change) => check(name, key({...ask, ...change}) === key(ask), false);
+    differs('another text', {text: 'GET /x'});
+    differs('another title', {title: 'Approve this change?'});
+    differs('another icon', {icon: 'media-tape'});
+    differs('another width', {width: 720});
+    differs('another button', {buttons: [ask.buttons[0], {answer: 'ok', label: 'Approve', key: 'a'}]});
+
+    // Nothing that streams is ever the same as anything.
+    const never = (name, raw) => check(name, key(raw), null);
+    never('a text read from stdin', {kind: 'text', buttons: [], info: {more: true}});
+    never('a list read from stdin', {kind: 'list', buttons: [], list: {columns: ['a'], more: true}});
+    never('a progress bar', {kind: 'progress', buttons: []});
+    never('a listening notification', {kind: 'notification', buttons: [], note: {listen: true}});
+    never('a scale printing as it moves', {kind: 'scale', buttons: [], scale: {partial: true}});
+
+    // Everything else is.
+    const shared = (name, raw) => check(name, typeof key(raw), 'string');
+    shared('a text from a file', {kind: 'text', buttons: [], info: {text: 'x'}});
+    shared('an editable text', {kind: 'text', buttons: [], info: {text: 'x', editable: true}});
+    shared('a list', {kind: 'list', buttons: [], list: {columns: ['a'], rows: [['1']]}});
+    shared('a scale', {kind: 'scale', buttons: [], scale: {value: 3}});
+    shared('a notification', {kind: 'notification', buttons: [], text: 'done'});
+    shared('a password', {kind: 'password', buttons: []});
+    shared('a hidden entry', {kind: 'entry', buttons: [], entry: {hidden: true}});
+    shared('a question', ask);
 }
 
 // ---- dates -------------------------------------------------------------------

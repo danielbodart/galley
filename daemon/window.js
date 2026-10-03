@@ -34,6 +34,11 @@
 // nothing: a progress bar is a live item until it is done and answered, and
 // a notification is an entry that stays, once its client has gone, until
 // the person dismisses it.
+//
+// The same question asked again while it waits is one row, not two: the
+// second asker joins the first, and one answer answers both. Only what is
+// still waiting is joined -- nothing answered is remembered -- and never an
+// item that streams.
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -41,7 +46,7 @@ import Gdk from 'gi://Gdk?version=4.0';
 import Gtk from 'gi://Gtk?version=4.0';
 import Adw from 'gi://Adw?version=1';
 
-import {Queue, waited} from './queue.js';
+import {Queue, waited, sameness} from './queue.js';
 import {render, lines, buttonMarkup} from './render.js';
 import {makeBody, chooseFiles} from './bodies.js';
 import {tint, symbolicName, css} from './icons.js';
@@ -88,6 +93,9 @@ export class QueueWindow {
         // Where the selected item was when its asker withdrew it, while
         // nothing has been picked since; -1 otherwise.
         this._parkedAt = -1;
+        // The items still waiting, by what makes them the same question
+        // (queue.js), for the same question asked again to join.
+        this._live = new Map();
         // Opens GTK's file chooser for a file-selection item; the test
         // control stands in for it.
         this.chooseFiles = chooseFiles;
@@ -99,7 +107,7 @@ export class QueueWindow {
         // window has now, and again whenever it changes.
         const provider = new Gtk.CssProvider();
         const style = Adw.StyleManager.get_default();
-        const tints = () => provider.load_from_string(css(style.dark));
+        const tints = () => provider.load_from_string(css(style.dark) + ASKERS_CSS);
         style.connect('notify::dark', tints);
         tints();
         Gtk.StyleContext.add_provider_for_display(
@@ -198,23 +206,89 @@ export class QueueWindow {
     // (append, rows, progress), timeout() to answer it as timed out, and
     // withdraw() when its client has gone. client.answer(answer) is called
     // once, when it is answered; client.tell(line) for a line before that.
+    //
+    // An item the same as one still waiting adds no row: its client joins
+    // that one's askers, and shares its answer. Its timeout and its going
+    // are its own, and the row goes with the last of them.
     add(item, client) {
+        const key = sameness(item);
+        const live = key && this._live.get(key);
+        if (live && !live.done) {
+            const attachment = {client};
+            live.askers.push(attachment);
+            this._askers(live);
+            return this._handle(live, attachment);
+        }
         const record = this._add(item, client);
-        const follow = record.body.follow ?? {};
+        record.key = key;
+        if (key)
+            this._live.set(key, record);
+        return this._handle(record, record.askers[0]);
+    }
+
+    // An asker's handle on its row. Only an item that streams takes lines
+    // after it is queued: one that is shared stays the question each of its
+    // askers asked, whatever one of them sends.
+    _handle(record, attachment) {
+        const follow = record.key === null ? record.body.follow ?? {} : {};
         return {
             append: text => !record.done && follow.append?.(text),
             rows: rows => !record.done && follow.rows?.(rows),
             progress: update => !record.done && follow.progress?.(update),
-            timeout: () => this._finish(record, {answer: 'timeout'}, false),
+            timeout: () => this._leave(record, attachment, {answer: 'timeout'}),
             // A notification outlives its client, as zenity's does: it is
-            // the person's to dismiss.
+            // the person's to dismiss, and its client goes only from those
+            // counted as asking it.
             withdraw: () => {
                 if (record.item.kind === 'notification')
-                    record.client = null;
+                    this._detach(record, attachment);
                 else
-                    this._remove(record, false);
+                    this._leave(record, attachment, null);
             },
         };
+    }
+
+    // One asker going, by its own timeout or by leaving. The last takes the
+    // item with it, as a sole asker always has; any other takes only itself,
+    // with what is chosen or typed so far when it timed out, as zenity
+    // prints then.
+    _leave(record, attachment, answer) {
+        if (record.done || !record.askers.includes(attachment))
+            return;
+        if (record.askers.length === 1) {
+            if (answer)
+                this._finish(record, answer, false);
+            else
+                this._remove(record, false);
+            return;
+        }
+        if (answer) {
+            record.body.values?.(answer);
+            attachment.client?.answer(answer);
+        }
+        this._detach(record, attachment);
+    }
+
+    // An asker no longer among the row's, and no longer counted on it. A
+    // notification its last asker has left stays for the person, but asks
+    // nothing more: the same one sent again is a new entry, and tells them
+    // again.
+    _detach(record, attachment) {
+        const i = record.askers.indexOf(attachment);
+        if (i < 0)
+            return;
+        record.askers.splice(i, 1);
+        this._askers(record);
+        if (record.askers.length === 0 && this._live.get(record.key) === record)
+            this._live.delete(record.key);
+    }
+
+    // How many are asking, on the row's icon when more than one is.
+    _askers(record) {
+        const n = record.askers.length;
+        record.rowAskers.label = String(n);
+        record.rowAskers.visible = n > 1;
+        record.rowIcon.tooltip_text = n > 1 ? `${n} asking` : null;
     }
 
     // A --notification --listen: nothing until its first message, then one
@@ -247,7 +321,7 @@ export class QueueWindow {
             item,
             group: item.title,
             arrived: GLib.get_monotonic_time(),
-            client,
+            askers: client ? [{client}] : [],
             done: false,
             waitLabels: [],
             default: item.default,
@@ -264,8 +338,10 @@ export class QueueWindow {
             },
             finish: answer => this._finish(record, answer, true),
             tell: line => {
-                if (!record.done)
-                    record.client?.tell(line);
+                for (const a of record.askers) {
+                    if (!record.done)
+                        a.client?.tell(line);
+                }
             },
             setText: (text, markup) => this._setText(record, text, markup),
             setButton: (answer, how) => this._setButton(record, answer, how),
@@ -294,9 +370,16 @@ export class QueueWindow {
     _row(record) {
         const {item} = record;
         const box = new Gtk.Box({spacing: 8, margin_top: 6, margin_bottom: 6, margin_start: 6, margin_end: 6});
-        record.rowIcon = new Gtk.Image({valign: Gtk.Align.START});
+        record.rowIcon = new Gtk.Image();
         paintRow(record.rowIcon, item);
-        box.append(record.rowIcon);
+        // How many are asking the same, small at the icon's foot.
+        const iconBox = new Gtk.Overlay({child: record.rowIcon, valign: Gtk.Align.START});
+        record.rowAskers = new Gtk.Label({
+            css_classes: ['askers', 'numeric'], halign: Gtk.Align.END, valign: Gtk.Align.END,
+            can_target: false, visible: false,
+        });
+        iconBox.add_overlay(record.rowAskers);
+        box.append(iconBox);
         const words = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, hexpand: true});
         record.rowFirst = new Gtk.Label({xalign: 0, ellipsize: 3, single_line_mode: true});
         record.rowSecond = new Gtk.Label({
@@ -439,13 +522,15 @@ export class QueueWindow {
         this._finish(record, answer, true);
     }
 
-    // An item answered: by the person, or else by its timeout.
+    // An item answered: by the person, or else by its timeout. Every
+    // client asking it has the one answer.
     _finish(record, answer, byPerson) {
         if (record.done)
             return;
         if (answer.answer === 'ok' || answer.answer === 'timeout')
             record.body.values?.(answer);
-        record.client?.answer(answer);
+        for (const a of record.askers)
+            a.client?.answer(answer);
         this._remove(record, byPerson);
     }
 
@@ -457,6 +542,9 @@ export class QueueWindow {
         if (record.done)
             return;
         record.done = true;
+        // Asked again from now on, it is a new row.
+        if (this._live.get(record.key) === record)
+            this._live.delete(record.key);
         // What was typed -- a password above all -- is cleared from its
         // widget the moment it is answered or withdrawn, rather than left
         // for the collector; and a chooser still open is closed.
@@ -468,7 +556,7 @@ export class QueueWindow {
         this.list.remove(record.row);
         this.list.invalidate_headers();
         this.stack.remove(record.page);
-        record.client = null;
+        record.askers = [];
 
         if (this.queue.length === 0) {
             this._parkedAt = -1;
@@ -723,12 +811,21 @@ export class QueueWindow {
                     label: b.label, key: b.key ?? '', enabled: r.buttons[i].sensitive,
                 })),
                 default: r.default,
-                connected: r.client !== null,
+                connected: r.askers.length > 0,
+                askers: r.askers.length,
+                // The count on its icon, as it is drawn: '' when hidden.
+                badge: r.rowAskers.visible ? r.rowAskers.label : '',
                 body: r.body.state?.(),
             })),
         };
     }
 }
+
+// The count of those asking the same, at the foot of a row's icon: small,
+// and in the row's own colour, as the time it has waited is.
+const ASKERS_CSS = `
+label.askers { font-size: 0.65em; font-weight: bold; opacity: 0.7; margin: 0 -5px -3px 0; }
+`;
 
 const isButton = widget => widget instanceof Gtk.Button || widget instanceof Gtk.CheckButton;
 

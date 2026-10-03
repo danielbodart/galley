@@ -138,6 +138,15 @@ request?", sudo's "Authentication Required" -- newest at the bottom, each
 showing how long it has waited. A client that is killed, or whose caller
 stops waiting, takes its question with it.
 
+The same question asked again while it is still waiting adds no row: it
+joins the one already there, which shows how many are asking in a small
+number at the foot of its icon, and one answer answers them all -- a burst
+of the same request is one press, not many. One asker leaving or timing out
+takes only itself, and the row goes with the last. A question that streams
+never joins one: a `--progress`, a `--text-info` or `--list` read from stdin,
+`--scale --print-partial`, `--notification --listen`. Nothing is remembered
+once a question is answered: asked again, it is a new row.
+
 Every one of zenity's dialogs is an item in the queue, the ones that ask
 nothing too, so that whatever arrives is worked through in the order it came:
 
@@ -154,13 +163,14 @@ nothing too, so that whatever arrives is worked through in the order it came:
   chooser closed without choosing leaves it waiting.
 - **A notification** is an entry with its text and icon, there until you
   dismiss it with its button. `galley --notification` returns at once, as
-  zenity does, and the entry outlives it; with `--listen` it reads zenity's
-  commands from stdin -- `message:` and `tooltip:` set the entry's text, a new
-  entry once the last is dismissed, `icon:` the icon of what follows,
-  `visible:` nothing, as in zenity 4.2 -- and returns when stdin ends. When
-  the window is not in front, a notification also goes to the desktop, with
-  its own text, at normal priority, and is withdrawn when the entry is
-  dismissed or the window comes forward.
+  zenity does, and the entry outlives it -- asking nothing once it has,
+  so the same one sent again is an entry of its own; with `--listen`
+  it reads zenity's commands from stdin -- `message:` and `tooltip:`
+  set the entry's text, a new entry once the last is dismissed, `icon:`
+  the icon of what follows, `visible:` nothing, as in zenity 4.2 -- and
+  returns when stdin ends. When the window is not in front, a notification
+  also goes to the desktop, with its own text, at normal priority, and is
+  withdrawn when the entry is dismissed or the window comes forward.
 
 It looks as the desktop does: libadwaita's dark or light style, GNOME's
 accent colour and high contrast, followed as they change while the window is
@@ -224,7 +234,9 @@ millisecond. It reads the command line, connects to
 `$XDG_RUNTIME_DIR/galley/sock`, sends the question as one line of JSON, and
 blocks until the answer comes back on the same connection. The connection is
 the question: when the client exits, the kernel closes it and the window
-drops the row.
+drops the row. Strictly, each connection is an asker, and closing it
+withdraws that asker; identical questions share a row until the last of
+theirs goes.
 
 The window is one long-running GJS process, GTK 4 and libadwaita, started by
 systemd the first time something connects (a socket-activated user service;
@@ -271,7 +283,10 @@ started before the rest.
   and a form's password go from the field to the client's stdout and nowhere
   else: never logged, never in the window's state, never written to disk.
   Every field an item has is cleared the moment it is answered or withdrawn,
-  and a file chooser still open is closed.
+  and a file chooser still open is closed. A password typed into a prompt
+  that several clients are asking the same goes to each of them, and a
+  question they share takes no lines after it is queued, so none of them
+  can change what the others are waiting on.
 - **A sandbox cannot ask.** A session sandboxed without
   `$XDG_RUNTIME_DIR` -- flong's, a container's -- cannot reach the socket,
   and that is the design: questions come from the host's own programs, such

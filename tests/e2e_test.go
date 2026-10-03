@@ -143,6 +143,8 @@ type state struct {
 		} `json:"buttons"`
 		Default   int             `json:"default"`
 		Connected bool            `json:"connected"`
+		Askers    int             `json:"askers"`
+		Badge     string          `json:"badge"`
 		Body      json.RawMessage `json:"body"`
 	} `json:"items"`
 }
@@ -634,4 +636,222 @@ func TestTheWindowRefusesABadItem(t *testing.T) {
 	if len(current(t).Items) != 0 {
 		t.Errorf("a refused item was queued")
 	}
+}
+
+// ---- the same question ------------------------------------------------
+
+// asking is n rows, the first with this many asking, and its icon showing
+// the count when more than one is.
+func asking(n, askers int) func(state) bool {
+	badge := ""
+	if askers > 1 {
+		badge = fmt.Sprint(askers)
+	}
+	return func(s state) bool {
+		return len(s.Items) == n && s.Items[0].Askers == askers && s.Items[0].Badge == badge
+	}
+}
+
+// The same question asked twice is one row, and one press answers both.
+func TestTheSameQuestionIsOneRow(t *testing.T) {
+	need(t)
+	first := start(t, "", asker("same")...)
+	waitFor(t, "the first", items(1))
+	second := start(t, "", asker("same")...)
+	waitFor(t, "the second to join it", asking(1, 2))
+	other := start(t, "", asker("other")...)
+	s := waitFor(t, "the other", items(2))
+	if s.Items[1].Askers != 1 || s.Items[1].Badge != "" {
+		t.Errorf("the other has %d asking, badged %q", s.Items[1].Askers, s.Items[1].Badge)
+	}
+
+	press(t, "a")
+	first.expect(t, 0, "")
+	second.expect(t, 0, "")
+	other.waiting(t)
+	press(t, "r")
+	other.expect(t, 1, "")
+}
+
+// An asker that times out or is killed takes only itself; the row stays
+// for the rest. One timing out is answered by the window, with what is
+// typed so far, as a sole asker is.
+func TestAnAskerLeavingLeavesTheOthers(t *testing.T) {
+	need(t)
+	name := []string{"--entry", "--title=Who?", "--text=Name:"}
+	killed := start(t, "", name...)
+	waitFor(t, "the first", items(1))
+	last := start(t, "", name...)
+	waitFor(t, "the second", asking(1, 2))
+	timed := start(t, "", append(name, "--timeout=3")...)
+	waitFor(t, "the timed one to join", asking(1, 3))
+	control(t, map[string]any{"entry": "typed"})
+	timed.expect(t, 5, "typed\n")
+	waitFor(t, "the timed out one to go", asking(1, 2))
+
+	killed.cmd.Process.Signal(syscall.SIGTERM)
+	waitFor(t, "the killed one to go", asking(1, 1))
+	last.waiting(t)
+	press(t, "Return")
+	last.expect(t, 0, "typed\n")
+}
+
+// Nothing is remembered: the same question asked once the last was
+// answered is a new row.
+func TestAnAnsweredQuestionIsAskedAgain(t *testing.T) {
+	need(t)
+	r := start(t, "", asker("again")...)
+	s := waitFor(t, "the question", items(1))
+	before := s.Items[0].ID
+	press(t, "a")
+	r.expect(t, 0, "")
+
+	r = start(t, "", asker("again")...)
+	s = waitFor(t, "the question again", items(1))
+	if s.Items[0].ID == before || s.Items[0].Askers != 1 {
+		t.Errorf("asked again: %+v", s.Items[0])
+	}
+	press(t, "r")
+	r.expect(t, 1, "")
+}
+
+// The same password prompt twice, as two sudos at once ask it: one
+// password answers both.
+func TestTheSamePasswordAnswersAll(t *testing.T) {
+	need(t)
+	sudo := []string{"--entry", "--hide-text", "--title=Authentication Required", "--text=Password for dan:"}
+	first := start(t, "", sudo...)
+	waitFor(t, "the first", items(1))
+	second := start(t, "", sudo...)
+	waitFor(t, "the second to join it", asking(1, 2))
+	control(t, map[string]any{"entry": "pw"})
+	press(t, "Return")
+	first.expect(t, 0, "pw\n")
+	second.expect(t, 0, "pw\n")
+}
+
+// Whatever streams is a row of its own, however alike.
+func TestStreamsAreNeverShared(t *testing.T) {
+	need(t)
+	var bars []io.WriteCloser
+	var runs []*run
+	for i := 0; i < 2; i++ {
+		r, in := startPiped(t, "--progress", "--title=Copying")
+		waitFor(t, "the bar", items(i+1))
+		runs, bars = append(runs, r), append(bars, in)
+	}
+	for i, in := range bars {
+		in.Close()
+		waitFor(t, "the bar to end", func(s state) bool {
+			return len(s.Items) == 2-i && s.Items[0].Buttons[1].Enabled
+		})
+		press(t, "Return")
+		runs[i].expect(t, 0, "")
+		waitFor(t, "the bar to go", items(1-i))
+	}
+
+	a := start(t, "the same\n", "--text-info")
+	waitFor(t, "the first text", items(1))
+	b := start(t, "the same\n", "--text-info")
+	waitFor(t, "the second text", items(2))
+	press(t, "Return")
+	a.expect(t, 0, "")
+	press(t, "Return")
+	b.expect(t, 0, "")
+
+	scale := []string{"--scale", "--value=3", "--print-partial"}
+	a = start(t, "", scale...)
+	waitFor(t, "the first scale", items(1))
+	b = start(t, "", scale...)
+	waitFor(t, "the second scale", items(2))
+	press(t, "Return")
+	a.expect(t, 0, "3\n")
+	press(t, "Return")
+	b.expect(t, 0, "3\n")
+}
+
+// A notification waited on is shared by those waiting on it, as any
+// question is. One whose clients have gone, as they do as soon as it is
+// queued, asks nothing: the same one sent again is a new entry, and tells
+// the person again.
+func TestTheSameNotificationCountsWhoIsThere(t *testing.T) {
+	need(t)
+	// With a timeout, zenity's waits.
+	a := start(t, "", "--notification", "--text=done", "--timeout=10")
+	waitFor(t, "one waiting on it", asking(1, 1))
+	b := start(t, "", "--notification", "--text=done", "--timeout=10")
+	waitFor(t, "two waiting on it", asking(1, 2))
+	press(t, "d")
+	a.expect(t, 0, "")
+	b.expect(t, 0, "")
+	waitFor(t, "it to go", items(0))
+
+	for i := 0; i < 3; i++ {
+		start(t, "", "--notification", "--text=done").expect(t, 0, "")
+		waitFor(t, "an entry of its own", func(s state) bool {
+			if len(s.Items) != i+1 {
+				return false
+			}
+			for _, it := range s.Items {
+				if it.Askers != 0 || it.Badge != "" || it.Connected {
+					return false
+				}
+			}
+			return true
+		})
+	}
+	for i := 2; i >= 0; i-- {
+		press(t, "d")
+		waitFor(t, "one to be dismissed", items(i))
+	}
+}
+
+// A shared row takes no lines from its askers: one that joins cannot
+// change the question another is waiting on.
+func TestASharedRowTakesNoLines(t *testing.T) {
+	need(t)
+	dial := func(hello string) (net.Conn, *bufio.Reader) {
+		c, err := net.Dial("unix", filepath.Join(runtimeDir, "galley", "sock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { c.Close() })
+		fmt.Fprintln(c, hello)
+		return c, bufio.NewReader(c)
+	}
+	answer := func(r *bufio.Reader, want string) {
+		t.Helper()
+		if line, _ := r.ReadString('\n'); strings.TrimSpace(line) != want {
+			t.Errorf("answer = %q, want %s", line, want)
+		}
+	}
+	buttons := `"buttons":[{"answer":"cancel","label":"Refuse","key":"r"},{"answer":"ok","label":"Approve","key":"a"}]`
+
+	text := `{"galley":2,"item":{"kind":"text","title":"Approve this change?",` + buttons + `,"info":{"text":"- a\n+ b\n"}}}`
+	_, asked := dial(text)
+	waitFor(t, "the text", items(1))
+	joined, _ := dial(text)
+	waitFor(t, "the second to join it", asking(1, 2))
+	fmt.Fprintln(joined, `{"append":"+ harmless\n"}`)
+	joined.Close()
+	s := waitFor(t, "the joined one to go", asking(1, 1))
+	if s.Items[0].Info != "- a\n+ b\n" {
+		t.Errorf("the text became %q", s.Items[0].Info)
+	}
+	press(t, "a")
+	answer(asked, `{"answer":"ok"}`)
+
+	list := `{"galley":2,"item":{"kind":"list","title":"Pick one",` + buttons + `,"list":{"columns":["x"],"rows":[["a"],["b"]]}}}`
+	_, asked = dial(list)
+	waitFor(t, "the list", items(1))
+	joined, _ = dial(list)
+	waitFor(t, "the second to join it", asking(1, 2))
+	fmt.Fprintln(joined, `{"rows":[["evil"]]}`)
+	joined.Close()
+	s = waitFor(t, "the joined one to go", asking(1, 1))
+	if rows := body[table](t, s.Items[0].Body).Rows; len(rows) != 2 {
+		t.Errorf("the rows became %v", rows)
+	}
+	press(t, "r")
+	answer(asked, `{"answer":"cancel"}`)
 }

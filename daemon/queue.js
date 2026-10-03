@@ -1,5 +1,5 @@
-// The queue's order, with nothing of GTK in it, so it can be tested on its
-// own.
+// The queue's order, and which of its items are the same question, with
+// nothing of GTK in it, so it can be tested on its own.
 //
 // Items are grouped by their caller -- an item's group is its title, which
 // is the nearest thing to a caller zenity's command line has: frisket's asker
@@ -75,3 +75,21 @@ export function waited(microseconds) {
         return `${m}m`;
     return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+
+// Whether an item has lines to follow it in either direction once it is
+// queued: a text-info or a list read from stdin, a progress bar, a
+// listening notification, a scale printing each value as it moves.
+export function streams(item) {
+    switch (item.kind) {
+    case 'text': return item.info.more;
+    case 'list': return item.list.more;
+    case 'progress': return true;
+    case 'notification': return item.note.listen;
+    case 'scale': return item.scale.partial;
+    }
+    return false;
+}
+
+// What makes two items the same question: the whole item, as validate()
+// made it. null for one that streams, which is never shared.
+export const sameness = item => (streams(item) ? null : JSON.stringify(item));
