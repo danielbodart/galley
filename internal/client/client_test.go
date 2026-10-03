@@ -336,8 +336,7 @@ func TestVersion(t *testing.T) {
 	var out bytes.Buffer
 	env := Env{Stdout: &out, Stderr: &out, Getenv: func(string) string { return "" }, Version: "0.1"}
 	Main([]string{"/bin/galley", "--version"}, env)
-	Main([]string{"/run/current-system/sw/bin/zenity", "--version"}, env)
-	if out.String() != "0.1\n"+ZenityVersion+"\n" {
+	if out.String() != "0.1\n" {
 		t.Errorf("got %q", out.String())
 	}
 }

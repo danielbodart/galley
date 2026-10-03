@@ -78,21 +78,12 @@
           platforms = nixpkgs.lib.platforms.linux;
         };
       };
-
-      # galley, also as `zenity`, for a PATH where it should stand in.
-      mkZenity = pkgs: galley: pkgs.runCommand "galley-zenity-${version}"
-        { meta = galley.meta // { mainProgram = "zenity"; }; }
-        ''
-          mkdir -p $out/bin
-          ln -s ${galley}/bin/galley $out/bin/zenity
-        '';
     in
     {
       packages = forAllSystems (system:
         let pkgs = nixpkgs.legacyPackages.${system}; in
         rec {
           galley = mkGalley pkgs;
-          galley-zenity = mkZenity pkgs galley;
           default = galley;
         });
 
@@ -116,7 +107,7 @@
         in
         {
           # The build, which is also the client's tests.
-          inherit (self.packages.${system}) galley galley-zenity;
+          inherit (self.packages.${system}) galley;
 
           gofmt = pkgs.runCommand "gofmt"
             { nativeBuildInputs = [ pkgs.go ]; }

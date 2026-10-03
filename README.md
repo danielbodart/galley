@@ -47,11 +47,9 @@ $ echo $?
 - **chase's approver.** `--text-info --filename=… --ok-label=Approve
   --cancel-label=Refuse` exits 0 to approve.
 
-To have every caller that finds zenity on `PATH` find galley, set
-`services.galley.zenity = true`, or install the `galley-zenity` package: it is
-`galley` under the name `zenity`. A caller that names zenity's store path,
-as `lib.getExe pkgs.zenity` does, has to be pointed at
-`lib.getExe galley` instead.
+galley is installed only as `galley`, never under zenity's name: a caller
+is pointed at it, `lib.getExe galley` where it named `lib.getExe pkgs.zenity`,
+and its command line stays as it was.
 
 ## The window
 
@@ -112,8 +110,8 @@ set it; galley forces no colour scheme and draws no colours of its own.
 | **Refused** | the dialogs that do not stack (`--list`, `--forms`, `--progress`, `--file-selection`, `--calendar`, …), `--editable`, `--html`, `--url`, an `--entry` given a list of values, and more than 16 buttons; each says so and exits 255 |
 | **No window** | when the window cannot be reached, galley exits 1 having said why, as zenity does when GTK has no display |
 
-`zenity --version` through the `zenity` name prints the zenity version whose
-command line galley reads, 4.2.2; `galley --version` prints galley's.
+galley reads zenity 4.2.2's command line; `galley --version` prints
+galley's own version.
 
 ## How it works
 
@@ -176,12 +174,10 @@ window only draws.
 |---|---|---|
 | `services.galley.enable` | `false` | The socket, and the window it starts. |
 | `services.galley.package` | this flake's `galley` | The client and the window. |
-| `services.galley.zenity` | `false` | Also put galley on `PATH` as `zenity`. Collides with a real zenity in `home.packages`. |
 | `services.galley.accessibility` | `false` | Leave GTK's accessibility bus on for the window, as a screen reader needs. |
 
-Packages: `galley` (`bin/galley`, `bin/galley-daemon`) and `galley-zenity`
-(`bin/zenity`). `$GALLEY_SOCKET` overrides the socket's path for the client
-and the window, for tests. It does not make a second window: the window is
+Package: `galley` (`bin/galley`, `bin/galley-daemon`). `$GALLEY_SOCKET`
+overrides the socket's path for the client and the window, for tests. It does not make a second window: the window is
 one application on the session bus, and a second `galley-daemon` in the
 same session says so and exits 1 rather than leave its socket unserved.
 

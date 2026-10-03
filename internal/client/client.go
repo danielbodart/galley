@@ -26,11 +26,6 @@ import (
 	"github.com/danielbodart/galley/internal/zenity"
 )
 
-// ZenityVersion is the zenity whose command line galley reads, which is what
-// `zenity --version` prints when galley is installed as zenity: a script
-// that checks it is asking which zenity's options it may use.
-const ZenityVersion = "4.2.2"
-
 // Env is everything Main reads from the world, so tests can supply it.
 type Env struct {
 	Stdin  io.Reader
@@ -46,7 +41,7 @@ type Env struct {
 }
 
 // Main runs one invocation and returns its exit status. args includes the
-// program name, which decides what --version prints.
+// program name.
 func Main(args []string, env Env) int {
 	inv, err := zenity.Parse(args[1:], env.Cwd)
 	if err != nil {
@@ -58,11 +53,7 @@ func Main(args []string, env Env) int {
 		fmt.Fprint(env.Stdout, usage)
 		return 0
 	case inv.Version:
-		if filepath.Base(args[0]) == "zenity" {
-			fmt.Fprintln(env.Stdout, ZenityVersion)
-		} else {
-			fmt.Fprintln(env.Stdout, env.Version)
-		}
+		fmt.Fprintln(env.Stdout, env.Version)
 		return 0
 	case inv.Show:
 		return show(env)

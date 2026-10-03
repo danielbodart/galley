@@ -1,8 +1,8 @@
 # The home-manager module, evaluated against just the options it sets, so
 # the check needs no home-manager input: the socket private, the service
 # running the window without the accessibility bus unless asked and with
-# nothing else of the session's environment changed, the zenity name only
-# when asked for.
+# nothing else of the session's environment changed, and galley under its
+# own name only.
 { pkgs, lib, self }:
 
 let
@@ -18,7 +18,6 @@ let
   }).config;
 
   on = eval { enable = true; };
-  zenity = eval { enable = true; zenity = true; };
   accessible = eval { enable = true; accessibility = true; };
   off = eval { };
 
@@ -32,8 +31,7 @@ assert lib.assertMsg (service.ExecStart == "${self.packages.${pkgs.stdenv.hostPl
 assert lib.assertMsg (service.Environment == [ "GTK_A11Y=none" ]) "service environment ${toString (service.Environment or [ ])}";
 assert lib.assertMsg (builtins.attrNames service == [ "Environment" "ExecStart" ]) "service sets ${toString (builtins.attrNames service)}: the window takes the session's environment whole, its bus for the settings portal";
 assert lib.assertMsg (!(accessible.systemd.user.services.galley.Service ? Environment)) "accessibility asked for but still off";
-assert lib.assertMsg (builtins.length on.home.packages == 1) "packages ${toString (names on)}";
-assert lib.assertMsg (builtins.elem "galley-zenity" (names zenity)) "no zenity: ${toString (names zenity)}";
+assert lib.assertMsg (names on == [ "galley-${self.packages.${pkgs.stdenv.hostPlatform.system}.galley.version}" ]) "packages ${toString (names on)}";
 assert lib.assertMsg (off.systemd.user.sockets == { } && off.home.packages == [ ]) "disabled but configured";
 {
   inherit socket service;
