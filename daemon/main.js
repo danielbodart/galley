@@ -16,6 +16,7 @@ import System from 'system';
 
 import {QueueWindow} from './window.js';
 import {Server} from './server.js';
+import {Tray} from './tray.js';
 
 const APP_ID = 'io.github.danielbodart.Galley';
 
@@ -58,6 +59,12 @@ app.connect('startup', () => {
     const show = new Gio.SimpleAction({name: 'show'});
     show.connect('activate', () => window.show(null));
     app.add_action(show);
+
+    // The tray icon, whose menu brings the window forward, as the action
+    // does, or quits it.
+    const bus = app.get_dbus_connection();
+    if (bus)
+        window.tray = new Tray(bus, token => window.show(token), () => app.quit());
 
     server = new Server(window);
     try {

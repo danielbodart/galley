@@ -97,13 +97,20 @@ notification says itself; see below.) A dialog that appears under the
 cursor is answered by whatever key was on its way -- the Enter that ends a
 command in a terminal -- and these questions exist for the presses that are
 meant. The notification is urgent, so GNOME shows it under Do Not Disturb
-too and keeps it until it is dismissed or the window comes forward; it is
-the only cue, as there is no tray count. Bring it forward with the
-notification, or with `galley --show` on a
-keyboard shortcut (GNOME: *Settings → Keyboard → Custom Shortcuts*). Under
-Wayland a window may only take focus with an activation token; `--show` passes
-on the one it was started with (`XDG_ACTIVATION_TOKEN`), and without one GNOME
-may say the window is ready rather than raise it.
+too and keeps it until it is dismissed or the window comes forward. Bring
+it forward with the notification, with `galley --show` on a keyboard
+shortcut (GNOME: *Settings → Keyboard → Custom Shortcuts*), or from the tray.
+Under Wayland a window may only take focus with an activation token; `--show`
+passes on the one it was started with (`XDG_ACTIVATION_TOKEN`), and without
+one GNOME may say the window is ready rather than raise it.
+
+From its start, which is the first question's arrival, the window has an icon
+in the tray with how many questions are waiting beside it. Its menu has *Open
+galley* and *Quit*, and a double click opens it too, the tray handing on a
+token so that it takes focus. Quitting hangs up on every client still
+waiting, as killing the window does; the next question starts it again. The
+icon is a StatusNotifierItem: GNOME shows it with the AppIndicator extension,
+and without one there is simply no icon.
 
 | key | |
 |---|---|
@@ -267,7 +274,8 @@ started before the rest.
 - **Answers are not on D-Bus.** galley is a GApplication, and a
   GApplication's actions are exported on the session bus, so buttons answer
   through their own signal handlers and no action answers anything. The one
-  action is `show`. GTK's accessibility bus could press a button too, so
+  action is `show`, and the tray icon's menu, also on the bus, only shows
+  the window or quits it. GTK's accessibility bus could press a button too, so
   the units start the window with it off (`GTK_A11Y=none`) unless
   `services.galley.accessibility` is set; a window started by hand has it
   on.

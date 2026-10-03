@@ -14,6 +14,7 @@ import {validate, rows, progressUpdate, notify} from '../daemon/validate.js';
 import {formatDate} from '../daemon/dates.js';
 import {tint, symbolicName, css} from '../daemon/icons.js';
 import {isDiff, diffSpans, MAX_DIFF} from '../daemon/diff.js';
+import {label} from '../daemon/tray.js';
 
 let failed = 0;
 function check(name, got, want) {
@@ -303,6 +304,12 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     // Lines with nothing in common are not marked within.
     check('unrelated', diffSpans('--- a\n+++ b\n@@ -1 +1 @@\n-abc\n+xyz').some(s => s.kind.endsWith('Word')), false);
 }
+
+// ---- the tray ------------------------------------------------------------
+
+check('tray label, nothing waiting', label(0), '');
+check('tray label, one', label(1), '1');
+check('tray label, many', label(12), '12');
 
 if (failed) {
     printerr(`${failed} failed`);

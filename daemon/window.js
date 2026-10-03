@@ -96,6 +96,8 @@ export class QueueWindow {
         // The items still waiting, by what makes them the same question
         // (queue.js), for the same question asked again to join.
         this._live = new Map();
+        // The tray icon, when the session has a bus for one (main.js).
+        this.tray = null;
         // Opens GTK's file chooser for a file-selection item; the test
         // control stands in for it.
         this.chooseFiles = chooseFiles;
@@ -706,9 +708,12 @@ export class QueueWindow {
         this.window.set_visible(false);
     }
 
+    // The window's title, and the tray's badge (tray.js), which counts what
+    // is waiting on an answer, as the notification does.
     _title() {
         const n = this.queue.length;
         this.window.title = n ? `galley (${n} waiting)` : 'galley';
+        this.tray?.count(this.queue.items.filter(r => asks(r.item)).length);
     }
 
     // Says something has arrived, when the window is not already in front.
