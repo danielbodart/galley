@@ -19,6 +19,12 @@ import {Server} from './server.js';
 
 const APP_ID = 'io.github.danielbodart.Galley';
 
+// The process's name is gjs's otherwise, and GTK gives the accessibility bus
+// that name for the application: a tool finding the window there, as
+// WayDriver does, would have to look for "gjs".
+GLib.set_prgname('galley');
+GLib.set_application_name('galley');
+
 const socketPath = GLib.getenv('GALLEY_SOCKET') ||
     GLib.build_filenamev([GLib.get_user_runtime_dir(), 'galley', 'sock']);
 
