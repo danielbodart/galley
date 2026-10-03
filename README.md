@@ -47,7 +47,11 @@ $ echo $?
   --cancel-label=Refuse --extra-button=Ask` exits 0, 1, or 1 with `Ask` on
   stdout, exactly as under zenity.
 - **chase's approver.** `--text-info --filename=… --ok-label=Approve
-  --cancel-label=Refuse` exits 0 to approve.
+  --cancel-label=Refuse` exits 0 to approve. Its text holds a unified
+  diff, which galley colours as one -- any `--text-info` that is not
+  `--editable` does, when it holds `---`, `+++` and `@@` headers one after
+  another -- with nothing asked of the caller, and nothing changed in the
+  text or what is printed.
 
 galley is installed only as `galley`, never under zenity's name: a caller
 is pointed at it, `lib.getExe galley` where it named `lib.getExe pkgs.zenity`,

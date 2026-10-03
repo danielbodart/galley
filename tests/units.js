@@ -13,6 +13,7 @@ import {render, lines, buttonMarkup} from '../daemon/render.js';
 import {validate, rows, progressUpdate, notify} from '../daemon/validate.js';
 import {formatDate} from '../daemon/dates.js';
 import {tint, symbolicName, css} from '../daemon/icons.js';
+import {isDiff, diffSpans, MAX_DIFF} from '../daemon/diff.js';
 
 let failed = 0;
 function check(name, got, want) {
@@ -217,6 +218,49 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     // A shade of each colour for either style.
     check('light shades', css(false).includes('image.tint-blue { color: var(--blue-4); }'), true);
     check('dark shades', css(true).includes('image.tint-blue { color: var(--blue-2); }'), true);
+}
+
+// ---- diffs -------------------------------------------------------------------
+
+{
+    // chase's approver: its own lines, then `diff -u`'s.
+    const approval = [
+        'What this checkout\'s chase.jsonc asks for has changed.',
+        '',
+        '--- approved',
+        '+++ proposed',
+        '@@ -1,3 +1,4 @@',
+        ' {',
+        '-  "images": ["postgres:18"],',
+        '+  "images": ["postgres:18", "redis:8"],',
+        '+  "lan": true',
+        ' }',
+    ].join('\n');
+    check('a diff', isDiff(approval), true);
+    check('prose', isDiff('--- a line of dashes\n+++ and pluses\nbut no hunk'), false);
+    check('a list', isDiff('- one\n+ two\n@@ three'), false);
+    check('too long', isDiff(approval + ' '.repeat(MAX_DIFF)), false);
+
+    const spans = diffSpans(approval);
+    const at = (kind, n) => spans.filter(s => s.kind === kind).map(s => approval.slice(s.start, s.end))[n];
+    check('nothing before the headers', spans.some(s => s.start < approval.indexOf('---')), false);
+    check('file', at('file', 0), '--- approved');
+    check('file +', at('file', 1), '+++ proposed');
+    check('hunk', at('hunk', 0), '@@ -1,3 +1,4 @@');
+    check('del', at('del', 0), '-  "images": ["postgres:18"],');
+    check('add', at('add', 1), '+  "lan": true');
+    check('context', spans.some(s => approval.slice(s.start, s.end) === ' {'), false);
+    // What changed in the line put in place of another.
+    check('del word', at('delWord', 0), undefined);
+    check('add word', at('addWord', 0), ', "redis:8"');
+    check('one pair', spans.filter(s => s.kind === 'addWord').length, 1);
+
+    // Offsets count characters, as GTK's do, not UTF-16 units.
+    const wide = '--- a\n+++ b\n@@ -1 +1 @@\n-🙂 x\n+🙂 y';
+    const w = diffSpans(wide).find(s => s.kind === 'addWord');
+    check('code points', [w.start, w.end], [Array.from(wide).length - 1, Array.from(wide).length]);
+    // Lines with nothing in common are not marked within.
+    check('unrelated', diffSpans('--- a\n+++ b\n@@ -1 +1 @@\n-abc\n+xyz').some(s => s.kind.endsWith('Word')), false);
 }
 
 if (failed) {

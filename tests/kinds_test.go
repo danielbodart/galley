@@ -497,3 +497,31 @@ func TestAVersionOneClientStillAsks(t *testing.T) {
 		t.Errorf("reply = %q", line)
 	}
 }
+
+// A unified diff in a text-info is coloured as one; the text, and what is
+// answered, are as they are for any text. Prose is not.
+func TestADiffIsShownAsOne(t *testing.T) {
+	need(t)
+	type text struct {
+		Diff bool `json:"diff"`
+	}
+	diff := "What has changed:\n\n--- approved\n+++ proposed\n@@ -1 +1 @@\n-a\n+b\n"
+	r := start(t, diff, "--text-info")
+	waitFor(t, "the diff", func(s state) bool {
+		return len(s.Items) == 1 && s.Items[0].Info == diff && body[text](t, s.Items[0].Body).Diff
+	})
+	press(t, "Return")
+	r.expect(t, 0, "")
+
+	prose := "--- not\n+++ a diff\n"
+	r = start(t, prose, "--text-info")
+	waitFor(t, "the text", func(s state) bool { return len(s.Items) == 1 && s.Items[0].Info == prose })
+	// Coloured, were it a diff, a main loop's turn after the text came.
+	time.Sleep(200 * time.Millisecond)
+	s := waitFor(t, "the text", items(1))
+	if body[text](t, s.Items[0].Body).Diff {
+		t.Errorf("prose shown as a diff")
+	}
+	press(t, "Return")
+	r.expect(t, 0, "")
+}

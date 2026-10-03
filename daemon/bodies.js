@@ -28,6 +28,7 @@ import Gtk from 'gi://Gtk?version=4.0';
 
 import {MAX_ROWS} from './validate.js';
 import {formatDate} from './dates.js';
+import {isDiff, diffSpans} from './diff.js';
 
 export function makeBody(item, ctx) {
     const make = kinds[item.kind];
@@ -93,6 +94,10 @@ function textBody(item) {
         top_margin: 6, bottom_margin: 6, left_margin: 6, right_margin: 6,
     });
     view.buffer.set_text(item.info.text ?? '', -1);
+    // A diff is coloured as one (diff.js) -- not one being edited, whose
+    // colours the typing would leave behind.
+    const colour = editable ? () => {} : diffColours(view.buffer);
+    colour();
     const scroller = new Gtk.ScrolledWindow({child: view, vexpand: true, css_classes: ['card']});
     const box = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, spacing: 12, vexpand: true});
     box.append(scroller);
@@ -126,14 +131,64 @@ function textBody(item) {
             append: s => {
                 const buffer = view.buffer;
                 buffer.insert(buffer.get_end_iter(), s, -1);
+                colour();
                 if (item.info.autoScroll)
                     view.scroll_to_mark(buffer.get_insert(), 0, false, 0, 0);
             },
         },
-        state: () => ({text: text()}),
+        state: () => ({text: text(), diff: diffShown(view.buffer)}),
         fill: v => view.buffer.set_text(String(v), -1),
     };
 }
+
+// What colours a diff, by kind of span: a line's background across the
+// view's width, a changed part's behind its characters, a header's letters.
+// Translucent, and a mid blue for a hunk's header, so that each reads on the
+// light style's view and on the dark's alike.
+const diffTags = {
+    add: {paragraph_background_rgba: rgba('rgba(46, 194, 126, 0.16)')},
+    del: {paragraph_background_rgba: rgba('rgba(224, 27, 36, 0.13)')},
+    addWord: {background_rgba: rgba('rgba(46, 194, 126, 0.40)')},
+    delWord: {background_rgba: rgba('rgba(224, 27, 36, 0.32)')},
+    hunk: {weight: 700, foreground_rgba: rgba('#3584e4')},
+    file: {weight: 700},
+};
+
+function rgba(spec) {
+    const c = new Gdk.RGBA();
+    c.parse(spec);
+    return c;
+}
+
+// Colours the buffer's text when it is a diff, again each time it is called
+// -- once more is added -- at most once a main loop's turn.
+function diffColours(buffer) {
+    const tags = {};
+    for (const [kind, props] of Object.entries(diffTags)) {
+        tags[kind] = new Gtk.TextTag({name: `diff-${kind}`, ...props});
+        buffer.tag_table.add(tags[kind]);
+    }
+    let pending = 0;
+    const apply = () => {
+        pending = 0;
+        const start = buffer.get_start_iter(), end = buffer.get_end_iter();
+        for (const tag of Object.values(tags))
+            buffer.remove_tag(tag, start, end);
+        const text = buffer.get_text(start, end, false);
+        buffer._diff = isDiff(text);
+        if (!buffer._diff)
+            return GLib.SOURCE_REMOVE;
+        for (const {kind, start: from, end: to} of diffSpans(text))
+            buffer.apply_tag(tags[kind], buffer.get_iter_at_offset(from), buffer.get_iter_at_offset(to));
+        return GLib.SOURCE_REMOVE;
+    };
+    return () => {
+        if (!pending)
+            pending = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, apply);
+    };
+}
+
+const diffShown = buffer => Boolean(buffer._diff);
 
 // ---- a table, for --list and a form's list -------------------------------
 
