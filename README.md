@@ -1,3 +1,5 @@
+<p align="center"><img src="logo.png" alt="galley" width="600"></p>
+
 # galley
 
 A zenity drop-in whose dialogs stack. Each call puts its question in one
