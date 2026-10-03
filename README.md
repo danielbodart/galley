@@ -18,6 +18,37 @@ changed grant -- which arrive in bursts, from several sessions at once, and
 used to arrive as a pile of windows each taking the keyboard from whatever
 was being typed.
 
+<p align="center"><img src="docs/screenshots/queue.png" alt="galley's window: the waiting questions on the left, grouped by title -- two requests, a command, two recorded connections, a change to approve and sudo's password -- and the first request, with Refuse and Allow, on the right" width="900"></p>
+
+## What it looks like
+
+The window as `examples/stack.sh` fills it: the questions galley's own
+callers ask -- frisket's asker for two requests, an SSH command and two
+connections it is recording, chase's approver with a changed grant, and
+sudo's askpass -- and below them one of each of zenity's other dialogs, out
+of sight further down the queue. Each is a row on the left, under its
+`--title`, with its icon and how long it has waited; the selected one is the
+page on the right.
+
+| | |
+|:---:|:---:|
+| <img src="docs/screenshots/asker.png" alt="A recorded connection: Connect to this name? with Refuse, Allow and Ask" width="440"><br>frisket's asker, recording: `--question --extra-button=Ask --icon=media-tape` | <img src="docs/screenshots/approver.png" alt="chase's approver: a unified diff of the grant, its added and removed lines coloured" width="440"><br>chase's approver: `--text-info` holding a unified diff |
+| <img src="docs/screenshots/askpass.png" alt="sudo's askpass: Authentication Required, with a password being typed" width="440"><br>sudo's askpass: `--entry --hide-text` | <img src="docs/screenshots/approver-dark.png" alt="The same diff in the dark style" width="440"><br>the same, in the dark style |
+
+<p align="center"><img src="docs/screenshots/queue-dark.png" alt="The queue in libadwaita's dark style" width="900"><br>The desktop's dark style, followed as it changes.</p>
+
+One of each of the other dialogs, as the page on the right shows it:
+
+| | | |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/entry.png" alt="--entry" width="280"><br>`--entry` | <img src="docs/screenshots/password.png" alt="--password --username" width="280"><br>`--password --username` | <img src="docs/screenshots/list.png" alt="--list" width="280"><br>`--list` |
+| <img src="docs/screenshots/checklist.png" alt="--list --checklist" width="280"><br>`--list --checklist` | <img src="docs/screenshots/forms.png" alt="--forms" width="280"><br>`--forms` | <img src="docs/screenshots/calendar.png" alt="--calendar" width="280"><br>`--calendar` |
+| <img src="docs/screenshots/scale.png" alt="--scale" width="280"><br>`--scale` | <img src="docs/screenshots/color-selection.png" alt="--color-selection" width="280"><br>`--color-selection` | <img src="docs/screenshots/progress.png" alt="--progress" width="280"><br>`--progress` |
+| <img src="docs/screenshots/file-selection.png" alt="--file-selection --save" width="280"><br>`--file-selection --save` | <img src="docs/screenshots/warning.png" alt="--warning" width="280"><br>`--warning` | <img src="docs/screenshots/error.png" alt="--error" width="280"><br>`--error` |
+
+A file chooser's page says what it asks for, and its button opens GTK's own
+chooser; `--info` is laid out as `--warning` is, under an icon of its own.
+
 ## Example
 
 With home-manager:
