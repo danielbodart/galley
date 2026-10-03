@@ -241,6 +241,11 @@ func parseAt(argv []string, cwd string, now time.Time) (*Invocation, error) {
 			item.Entry.Values = append(values, r.positional...)
 			item.Entry.Hidden = false
 		}
+		if item.Entry.Hidden {
+			// zenity's entry shows no icon, and takes no --icon; a password's
+			// is a key, as every password prompt's is.
+			item.Icon = defaultIcon[wire.KindPassword]
+		}
 		okCancel("_OK")
 
 	case wire.KindText:
@@ -366,6 +371,11 @@ func parseAt(argv []string, cwd string, now time.Time) (*Invocation, error) {
 				combos++
 			}
 			forms.Fields = append(forms.Fields, fd)
+			// A form that asks for a password shows the key, as every
+			// password prompt does.
+			if fd.Kind == wire.FieldPassword {
+				item.Icon = defaultIcon[wire.KindPassword]
+			}
 		}
 		item.Forms = forms
 		okCancel("_OK")
@@ -595,7 +605,7 @@ var defaultText = map[string]string{
 var defaultIcon = map[string]string{
 	wire.KindQuestion: "dialog-question", wire.KindInfo: "dialog-information",
 	wire.KindWarning: "dialog-warning", wire.KindError: "dialog-error",
-	wire.KindEntry: "insert-text", wire.KindText: "accessories-text-editor",
+	wire.KindEntry: "text-editor", wire.KindText: "accessories-text-editor",
 	wire.KindList: "view-list", wire.KindForms: "document-edit",
 	wire.KindCalendar: "x-office-calendar", wire.KindScale: "dialog-question",
 	wire.KindPassword: "dialog-password", wire.KindColor: "applications-graphics",

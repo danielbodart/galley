@@ -155,6 +155,33 @@ func TestTheSudoAskpass(t *testing.T) {
 	}
 }
 
+// Every prompt for a password shows the key, whichever dialog asks; what
+// asks for none does not.
+func TestEveryPasswordShowsTheKey(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--password"}, "dialog-password"},
+		{[]string{"--password", "--username"}, "dialog-password"},
+		{[]string{"--entry", "--hide-text"}, "dialog-password"},
+		{[]string{"--forms", "--add-entry=User", "--add-password=Password"}, "dialog-password"},
+		{[]string{"--forms", "--add-password=PIN"}, "dialog-password"},
+		{[]string{"--entry"}, "text-editor"},
+		// Values make the entry a combo, which zenity shows, hidden or not.
+		{[]string{"--entry", "--hide-text", "--entry-text=a", "b"}, "text-editor"},
+		{[]string{"--forms", "--add-entry=Name"}, "document-edit"},
+	} {
+		inv, err := Parse(c.args, "/")
+		if err != nil {
+			t.Fatalf("%q: %v", c.args, err)
+		}
+		if inv.Item.Icon != c.want {
+			t.Errorf("%q: icon = %q, want %q", c.args, inv.Item.Icon, c.want)
+		}
+	}
+}
+
 func TestTheChaseApprover(t *testing.T) {
 	inv, err := Parse([]string{"--text-info", "--title=Approve this change?",
 		"--ok-label=Approve", "--cancel-label=Refuse", "--width=720", "--height=520",

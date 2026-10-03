@@ -131,7 +131,12 @@ It looks as the desktop does: libadwaita's dark or light style, GNOME's
 accent colour and high contrast, followed as they change while the window is
 open. They reach it as they reach any libadwaita application, through the
 settings portal on the session bus, which the units leave as the session
-set it; galley forces no colour scheme and draws no colours of its own.
+set it; galley forces no colour scheme. Its one colour of its own is each
+question's icon: the same icon in the queue and over the question, its
+symbolic form tinted from libadwaita's palette by the icon's name, a shade
+for the dark style and one for the light, so `--icon` tells kinds of
+question apart at a glance. Every password prompt shows a key: `--password`,
+`--entry --hide-text`, a `--forms` with an `--add-password`.
 
 ## Compatibility
 

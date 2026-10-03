@@ -12,6 +12,7 @@ import {Queue, waited} from '../daemon/queue.js';
 import {render, lines, buttonMarkup} from '../daemon/render.js';
 import {validate, rows, progressUpdate, notify} from '../daemon/validate.js';
 import {formatDate} from '../daemon/dates.js';
+import {tint, symbolicName, css} from '../daemon/icons.js';
 
 let failed = 0;
 function check(name, got, want) {
@@ -185,6 +186,37 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     // A locale the system does not have leaves the window's.
     check('an unknown locale', formatDate(date, '%Y', 'xx_XX.UTF-8'), '2024');
     check('a format GLib cannot write', formatDate(date, '%Q', ''), null);
+}
+
+// ---- icons -----------------------------------------------------------------
+
+{
+    // Each kind of question its colour, the same for an icon and its
+    // symbolic variant; a file none.
+    check('sudo', tint('dialog-password'), 'tint-yellow');
+    check('symbolic', tint('dialog-password-symbolic'), 'tint-yellow');
+    check('approval', tint('accessories-text-editor'), 'tint-purple');
+    check('request', tint('security-medium'), 'tint-blue');
+    check('question', tint('dialog-question'), 'tint-teal');
+    check('entry', tint('text-editor'), 'tint-green');
+    check('recording', tint('media-tape'), 'tint-red');
+    check('forms', tint('document-edit'), 'tint-green');
+    check('file', tint('document-open'), 'tint-blue');
+    check('a file', tint('/a/b.png'), null);
+    check('none', tint(''), null);
+    // Any other name one of the same colours, always the same one.
+    check('hashed', tint('some-caller-icon'), tint('some-caller-icon-symbolic'));
+    check('hashed in palette', /^tint-[a-z]+$/.test(tint('some-caller-icon')) && css(false).includes(`image.${tint('some-caller-icon')} `), true);
+
+    // The queue shows the symbolic variant when the theme has one.
+    const has = n => n === 'media-floppy-symbolic';
+    check('has symbolic', symbolicName('media-floppy', has), 'media-floppy-symbolic');
+    check('already symbolic', symbolicName('media-floppy-symbolic', has), 'media-floppy-symbolic');
+    check('no symbolic', symbolicName('dialog-question', has), null);
+    check('file symbolic', symbolicName('/a/media-floppy', () => true), null);
+    // A shade of each colour for either style.
+    check('light shades', css(false).includes('image.tint-blue { color: var(--blue-4); }'), true);
+    check('dark shades', css(true).includes('image.tint-blue { color: var(--blue-2); }'), true);
 }
 
 if (failed) {

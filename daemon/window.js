@@ -44,6 +44,7 @@ import Adw from 'gi://Adw?version=1';
 import {Queue, waited} from './queue.js';
 import {render, lines, buttonMarkup} from './render.js';
 import {makeBody, chooseFiles} from './bodies.js';
+import {tint, symbolicName, css} from './icons.js';
 
 // What takes typed text, where letters are not keys.
 const editsText = widget =>
@@ -94,10 +95,20 @@ export class QueueWindow {
     }
 
     _build() {
+        // The icons' colours (icons.js), in the shades for the style the
+        // window has now, and again whenever it changes.
+        const provider = new Gtk.CssProvider();
+        const style = Adw.StyleManager.get_default();
+        const tints = () => provider.load_from_string(css(style.dark));
+        style.connect('notify::dark', tints);
+        tints();
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+
         this.window = new Adw.Window({
             application: this.app,
             title: 'galley',
-            default_width: 960,
+            default_width: 1080,
             default_height: 560,
             width_request: 360,
             height_request: 300,
@@ -160,8 +171,11 @@ export class QueueWindow {
         this.split = new Adw.NavigationSplitView({
             sidebar: new Adw.NavigationPage({title: 'Waiting', child: sidebarView}),
             content: this.content,
-            min_sidebar_width: 220,
-            max_sidebar_width: 340,
+            // Wide enough for a project's path: the queue's rows are told
+            // apart by their first lines.
+            sidebar_width_fraction: 0.36,
+            min_sidebar_width: 260,
+            max_sidebar_width: 480,
         });
         this.window.set_content(this.split);
 
@@ -216,7 +230,8 @@ export class QueueWindow {
                     current.item.text = message.text;
                     current.item.icon = icon;
                     this._setText(current, message.text, false);
-                    current.icon.set_from_gicon(gicon(icon));
+                    paint(current.icon, icon, current.item.kind);
+                    paintRow(current.rowIcon, current.item);
                     this._notify(current);
                 } else {
                     current = this._add({...item, text: message.text, icon, markup: false}, null);
@@ -279,7 +294,9 @@ export class QueueWindow {
     _row(record) {
         const {item} = record;
         const box = new Gtk.Box({spacing: 8, margin_top: 6, margin_bottom: 6, margin_start: 6, margin_end: 6});
-        box.append(new Gtk.Image({icon_name: symbolic(item), valign: Gtk.Align.START}));
+        record.rowIcon = new Gtk.Image({valign: Gtk.Align.START});
+        paintRow(record.rowIcon, item);
+        box.append(record.rowIcon);
         const words = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, hexpand: true});
         record.rowFirst = new Gtk.Label({xalign: 0, ellipsize: 3, single_line_mode: true});
         record.rowSecond = new Gtk.Label({
@@ -309,6 +326,8 @@ export class QueueWindow {
         const [first, second] = lines(shown, 2);
         record.rowFirst.set_text(first || item.title || 'Untitled');
         record.rowSecond.set_text(second ?? '');
+        record.rowFirst.tooltip_text = first || null;
+        record.rowSecond.tooltip_text = second || null;
         record.rowSecond.visible = Boolean(second);
     }
 
@@ -745,13 +764,44 @@ function gicon(name) {
 // An item's icon: a file when the name is a path, else a theme icon.
 function icon(name, kind) {
     const image = new Gtk.Image({pixel_size: 48, valign: Gtk.Align.START});
-    image.set_from_gicon(gicon(name || fallbackIcon[kind] || 'dialog-question'));
+    paint(image, name, kind);
     return image;
+}
+
+// Shows an icon in an image, in its colour (icons.js).
+function paint(image, name, kind) {
+    name ||= fallbackIcon[kind] || 'dialog-question';
+    image.set_from_gicon(gicon(name));
+    colour(image, tint(name));
+}
+
+// An item's icon in the queue: the one over its detail, as its symbolic
+// variant when the theme has one, so both sides show the same; the kind's
+// otherwise. A file is shown as itself.
+function paintRow(image, item) {
+    const name = item.icon;
+    if (name && name.startsWith('/')) {
+        image.set_from_gicon(gicon(name));
+        colour(image, null);
+        return;
+    }
+    const theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default());
+    const shown = symbolicName(name, n => theme.has_icon(n)) ?? symbolic(item);
+    image.icon_name = shown;
+    colour(image, tint(name || shown));
+}
+
+function colour(image, cls) {
+    for (const c of image.get_css_classes())
+        if (c.startsWith('tint-'))
+            image.remove_css_class(c);
+    if (cls)
+        image.add_css_class(cls);
 }
 
 const fallbackIcon = {
     question: 'dialog-question', info: 'dialog-information', warning: 'dialog-warning',
-    error: 'dialog-error', entry: 'insert-text', text: 'accessories-text-editor',
+    error: 'dialog-error', entry: 'text-editor', text: 'accessories-text-editor',
     list: 'view-list', forms: 'document-edit', calendar: 'x-office-calendar',
     scale: 'dialog-question', password: 'dialog-password', color: 'applications-graphics',
     file: 'document-open', progress: 'appointment-soon', notification: 'dialog-information',
@@ -761,7 +811,7 @@ const fallbackIcon = {
 const symbolicIcon = {
     question: 'dialog-question-symbolic', info: 'dialog-information-symbolic',
     warning: 'dialog-warning-symbolic', error: 'dialog-error-symbolic',
-    entry: 'document-edit-symbolic', text: 'text-x-generic-symbolic',
+    entry: 'text-editor-symbolic', text: 'text-x-generic-symbolic',
     list: 'view-list-symbolic', forms: 'document-edit-symbolic',
     calendar: 'x-office-calendar-symbolic', scale: 'view-continuous-symbolic',
     password: 'dialog-password-symbolic', color: 'color-select-symbolic',
