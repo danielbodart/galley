@@ -182,6 +182,11 @@
               export GALLEY_E2E_DAEMON="${pkgs.gjs}/bin/gjs -m $PWD/daemon/main.js"
               export GALLEY_E2E_BROADWAYD=${pkgs.gtk4}/bin/gtk4-broadwayd
               export HOME=$TMPDIR
+              # GTK's own schemas, as the package's wrapper gives the window:
+              # the colour chooser keeps its custom colours in GSettings, and
+              # GLib aborts on a schema it cannot find.
+              export XDG_DATA_DIRS=${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}
+              export GSETTINGS_BACKEND=memory
             '';
             checkPhase = ''
               runHook preCheck
