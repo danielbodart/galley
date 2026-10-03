@@ -7,6 +7,14 @@
 //                               "alt": true holds Alt, "hold": true leaves
 //                               it down, so the next press is a repeat
 //   {"entry": "text"}        -> the selected entry's text set
+//   {"fill": value}          -> the selected item's widgets set as a person
+//                               would set them: rows picked or ticked, a
+//                               date, a value, a colour, fields typed in
+//                               (each body's fill, in bodies.js)
+//   {"choose": [paths]}      -> the file chooser stood in for: the next one
+//                               opened chooses these, or with null is
+//                               dismissed; what it was opened with is in
+//                               the item's state
 //   {"focus": "Refuse"}      -> the selected item's button of that label
 //                               focused, as Tab would
 //   {"show": true}           -> the window brought forward
@@ -49,17 +57,42 @@ export function start(window, path) {
 // button presses it, and a character goes into a text field. Returns what
 // took it, or "" for nothing.
 function passOn(focus, keyval, name) {
+    const enter = ['Return', 'KP_Enter', 'ISO_Enter'].includes(name);
     if ((focus instanceof Gtk.Button || focus instanceof Gtk.CheckButton) &&
-        ['Return', 'KP_Enter', 'ISO_Enter', 'space', 'KP_Space'].includes(name)) {
+        (enter || ['space', 'KP_Space'].includes(name))) {
         focus.activate();
         return 'button';
+    }
+    if (focus instanceof Gtk.TextView && focus.editable && enter) {
+        focus.buffer.insert_at_cursor('\n', -1);
+        return 'text';
     }
     const code = Gdk.keyval_to_unicode(keyval);
     if (focus instanceof Gtk.Text && code >= 0x20) {
         focus.set_text(focus.get_text() + String.fromCodePoint(code));
         return 'entry';
     }
+    if (focus instanceof Gtk.TextView && focus.editable && code >= 0x20) {
+        focus.buffer.insert_at_cursor(String.fromCodePoint(code), -1);
+        return 'text';
+    }
+    if (['Up', 'Down', 'Left', 'Right'].includes(name) && focus)
+        return 'widget';
     return '';
+}
+
+// The file chooser, stood in for: what the next one opened chooses.
+let chosen = null;
+function standIn(spec, _parent, cancellable) {
+    return new Promise(resolve => {
+        const files = chosen;
+        chosen = null;
+        // Answered after the press that opened it, as a real chooser is.
+        GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+            resolve(cancellable.is_cancelled() ? null : files);
+            return GLib.SOURCE_REMOVE;
+        });
+    });
 }
 
 // The style manager's view of the desktop, by the enums' names.
@@ -93,9 +126,17 @@ async function serve(window, connection) {
                 window.release(keyval);
         } else if (typeof command.entry === 'string') {
             const current = window.current();
-            if (!current?.entry)
+            if (!current?.body.entry)
                 throw new Error('the selected item is not an entry');
-            current.entry.set_text(command.entry);
+            current.body.entry.set_text(command.entry);
+        } else if (command.fill !== undefined) {
+            const current = window.current();
+            if (!current?.body.fill)
+                throw new Error('the selected item has nothing to fill');
+            current.body.fill(command.fill);
+        } else if (command.choose !== undefined) {
+            window.chooseFiles = standIn;
+            chosen = command.choose;
         } else if (typeof command.focus === 'string') {
             const current = window.current();
             const i = current?.item.buttons.findIndex(b => b.label === command.focus) ?? -1;

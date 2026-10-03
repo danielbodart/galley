@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Seven made-up questions, a second apart, shaped like the ones galley's
 # callers ask -- an egress broker's asker (a request, an SSH command, a
-# recording's connection), a grant approver's diff, and sudo's askpass -- so
-# they stack in one window. Nothing is requested: each answer is only
-# printed, as exit status and stdout, once all seven are answered.
+# recording's connection), a grant approver's diff, and sudo's askpass --
+# and then one of each of zenity's other dialogs -- a list, a check list, a
+# form, a calendar, a scale, a password, a colour, a file to save, a combo,
+# a progress bar fed as it goes and a notification -- so they stack in one
+# window. Nothing is requested: each answer is only printed, as exit status
+# and stdout, once all are answered. The notification returns at once, and
+# its entry stays until it is dismissed.
 #
 #   examples/stack.sh            # galley from PATH
 #   GALLEY=./result/bin/galley examples/stack.sh
@@ -100,11 +104,45 @@ ask sudo --entry --hide-text --title="Authentication Required" \
 
 Password for alice:"
 
+ask list --list --title="Which container should start?" --width=560 \
+  --text="/home/alice/Projects/shop" \
+  --column=Image --column=Port --column=Status \
+  postgres:18 64320 stopped redis:8 63790 stopped caddy:2 8080 running
+
+ask checklist --list --checklist --title="Which grants should be kept?" --width=560 \
+  --column=Keep --column=Grant --column=Last-used --separator=, \
+  TRUE "registry.npmjs.org" "today" FALSE "nas.lan:80" "3 weeks ago" TRUE "api.github.com" "yesterday"
+
+ask forms --forms --title="New sandbox" --text="Describe the sandbox to create." \
+  --add-entry=Name --add-combo=Tier --combo-values="trusted|ops|untrusted" \
+  --add-calendar=Expires --forms-date-format=%Y-%m-%d --add-multiline-entry=Notes --separator=";"
+
+ask calendar --calendar --title="Expire this grant on" --day=31 --month=12 --year=2026 --date-format=%Y-%m-%d
+
+ask scale --scale --title="How many workers?" --text="Concurrent builds" --min-value=1 --max-value=16 --value=4
+
+ask password --password --username --title="Log in to the registry"
+
+ask colour --color-selection --title="Pick the workspace's colour" --color="#3584e4"
+
+ask save --file-selection --save --title="Save the audit log" \
+  --filename="$HOME/audit.log" --file-filter="Logs | *.log *.txt"
+
+ask combo --entry --title="Which branch?" --text="Branch to deploy:" --entry-text=main develop release/2.0
+
+{ for i in 10 25 40 55 70 85 100; do echo "# Copying layer $((i / 15 + 1)) of 7"; echo "$i"; sleep 2; done | \
+    "$galley" --progress --title="Pulling postgres:18" --time-remaining > "$out/progress.out"
+  echo $? > "$out/progress.status"; } &
+sleep 1
+
+ask notification --notification --text="Build finished\nshop: 214 tests passed in 3m 12s" --icon=emblem-ok-symbolic
+
 wait
 for f in "$out"/*.status; do
   name=$(basename "$f" .status)
   answer=$(cat "$out/$name.out")
   # A hidden entry's text is a password: say only that one came back.
   if [ "$name" = sudo ] && [ -n "$answer" ]; then answer="(${#answer} characters)"; fi
+  if [ "$name" = password ] && [ -n "$answer" ]; then pw=${answer#*|}; answer="${answer%%|*}|(${#pw} characters)"; fi
   printf '%-16s exit %s  %s\n' "$name" "$(cat "$f")" "$answer"
 done

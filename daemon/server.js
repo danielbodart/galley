@@ -12,11 +12,14 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
-import {validate} from './validate.js';
+import {validate, rows, progressUpdate, notify} from './validate.js';
 
 Gio._promisify(Gio.DataInputStream.prototype, 'read_line_async', 'read_line_finish_utf8');
 
-const VERSION = 1;
+// The protocol versions this window takes (internal/wire): any from the
+// first to its own, so a client older than the window still reaches it.
+const MIN_VERSION = 1;
+const VERSION = 2;
 
 // The longest line a client may send: a text-info's whole file arrives in
 // its first, and the client caps that at 16 MiB of text, which JSON's
@@ -137,8 +140,9 @@ export class Server {
                 return;
             }
             const hello = JSON.parse(first);
-            if (hello?.galley !== VERSION)
-                throw new Error(`protocol version ${hello?.galley} is not ${VERSION}`);
+            const version = hello?.galley;
+            if (!Number.isInteger(version) || version < MIN_VERSION || version > VERSION)
+                throw new Error(`protocol version ${version} is not one from ${MIN_VERSION} to ${VERSION}`);
 
             if (hello.show === true) {
                 this.window.show(typeof hello.token === 'string' ? hello.token : null);
@@ -147,11 +151,25 @@ export class Server {
                 return;
             }
 
-            const item = validate(hello.item);
-            handle = this.window.add(item, answer => {
-                send(answer);
-                hangUp();
-            });
+            const item = validate(hello.item, version);
+            const client = {
+                // The last line: the answer, and the conversation is over.
+                answer: answer => {
+                    send(answer);
+                    hangUp();
+                },
+                // A line before it: a scale's value as it moves.
+                tell: send,
+            };
+            if (item.kind === 'notification' && item.note.listen) {
+                handle = this.window.listen(item);
+            } else {
+                handle = this.window.add(item, client);
+                // A notification is the person's from here: its client may
+                // go, as zenity's does, and leave it in the queue.
+                if (item.kind === 'notification')
+                    send({queued: true});
+            }
 
             for (;;) {
                 const line = await read();
@@ -159,9 +177,19 @@ export class Server {
                     break;
                 const follow = JSON.parse(line);
                 if (typeof follow?.append === 'string')
-                    handle.append(follow.append);
+                    handle.append?.(follow.append);
                 if (follow?.timeout === true)
-                    handle.timeout();
+                    handle.timeout?.();
+                if (version < 2)
+                    continue;
+                if (follow?.rows !== undefined && item.kind === 'list')
+                    handle.rows(rows(follow.rows, 'rows', item.list.columns.length));
+                const update = progressUpdate(follow?.progress);
+                if (update && item.kind === 'progress')
+                    handle.progress(update);
+                const message = notify(follow?.notify);
+                if (message && handle.notify)
+                    handle.notify(message);
             }
         } catch (e) {
             // A closed connection rejects the pending read; anything else is

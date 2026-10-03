@@ -190,8 +190,21 @@ func TestDefaultsAreZenitys(t *testing.T) {
 		{[]string{"--info", "--text", `<b>a</b>\tb`}, "Information", "<b>a</b>\tb", "OK", "OK", true, false},
 		// --switch has only the extra buttons, and so no default.
 		{[]string{"--question", "--switch", "--extra-button", "One", "--extra-button", "Two"}, "Question", "Are you sure you want to proceed?", "One,Two", "", false, false},
-		// And with none, a Close that does what closing zenity's does.
-		{[]string{"--question", "--switch"}, "Question", "Are you sure you want to proceed?", "Close", "", false, false},
+		{[]string{"--list", "--column=a"}, "Select items from the list", "Select items from the list below.", "Cancel,OK", "OK", false, false},
+		{[]string{"--forms"}, "Forms dialog", "Forms dialog", "Cancel,OK", "OK", false, false},
+		{[]string{"--calendar"}, "Calendar selection", "Select a date from below.", "Cancel,OK", "OK", false, false},
+		{[]string{"--scale"}, "Adjust the scale value", "Adjust the scale value", "Cancel,OK", "OK", false, false},
+		{[]string{"--password"}, "Password", "Type your password", "Cancel,OK", "OK", false, false},
+		{[]string{"--color-selection"}, "Select a Color", "", "Cancel,Select", "Select", false, false},
+		{[]string{"--file-selection"}, "Open File", "Choose a file.", "Cancel,Open…", "Open…", false, false},
+		{[]string{"--file-selection", "--directory", "--multiple"}, "Select Folders", "Choose one or more folders.", "Cancel,Select…", "Select…", false, false},
+		// A progress bar's OK waits for it to be done, and so is no default.
+		{[]string{"--progress"}, "Progress", "Running...", "Cancel,OK", "", false, false},
+		{[]string{"--progress", "--percentage=100"}, "Progress", "Running...", "Cancel,OK", "OK", false, false},
+		{[]string{"--notification", "--text=a"}, "Notification", "a", "Dismiss", "Dismiss", false, false},
+		{[]string{"--about"}, "About galley", "", "Close", "Close", false, false},
+		// A dialog's --text is markup with its escapes undone.
+		{[]string{"--list", "--column=a", `--text=<i>x</i>\n`}, "Select items from the list", "<i>x</i>\n", "Cancel,OK", "OK", true, false},
 	} {
 		inv, err := Parse(c.args, "/")
 		if err != nil {
@@ -228,9 +241,16 @@ func TestSyntaxIsGOptions(t *testing.T) {
 	if inv.Item.Buttons[1].Label != "B" || !reflect.DeepEqual(inv.Extra, []string{"X", "Y"}) {
 		t.Errorf("buttons = %+v, extra = %q", inv.Item.Buttons, inv.Extra)
 	}
-	// Options zenity accepts for any dialog and galley has no use for.
-	if _, err := Parse([]string{"--question", "--modal", "--attach=5", "--window-icon=x", "--font=Mono 9", "--percentage=3"}, "/"); err != nil {
+	// Options zenity accepts for any dialog and galley has no use for: the
+	// scale's, which zenity never checks, and the forms' fields. A flag
+	// given a value is the flag.
+	if _, err := Parse([]string{"--question", "--modal=no", "--value=3", "--add-entry=x", "--hide-value"}, "/"); err != nil {
 		t.Errorf("harmless options refused: %v", err)
+	}
+	// --GROUP-OPTION is the group's option; integers are C's, in any base.
+	inv, err = Parse([]string{"--forms", "--forms-date-format=%d", "--general-width", "0x10", "--height= 010"}, "/")
+	if err != nil || inv.Item.Forms.DateFormat != "%d" || inv.Item.Width != 16 || inv.Item.Height != 8 {
+		t.Errorf("got %+v, %v", inv, err)
 	}
 	inv, _ = Parse([]string{"--question", "--timeout", "7"}, "/")
 	if inv.Timeout != 7 {
@@ -245,21 +265,32 @@ func TestRefusals(t *testing.T) {
 	}{
 		{[]string{"--question", "--frobnicate"}, "This option is not available. Please see --help for all possible usages."},
 		{[]string{"-q"}, "This option is not available."},
-		{[]string{"--question", "--hide-text=yes"}, "This option is not available."},
+		{[]string{"--question", "--hide-text=yes"}, "--hide-text is not supported for this dialog"},
 		{[]string{}, "You must specify a dialog type."},
 		{[]string{"--question", "--entry"}, "Two or more dialog options specified"},
-		{[]string{"--question", "--width=wide"}, "Cannot parse integer value “wide” for --width"},
-		{[]string{"--question", "--text"}, "Missing argument for --text"},
+		// GOption's own errors, which zenity's error hook says as the first.
+		{[]string{"--question", "--width=wide"}, "This option is not available."},
+		{[]string{"--question", "--width=7x"}, "This option is not available."},
+		{[]string{"--question", "--width=3000000000"}, "This option is not available."},
+		{[]string{"--question", "--text"}, "This option is not available."},
+		{[]string{"--info", "--info-text=x"}, "This option is not available."},
+		// A --switch with no buttons.
+		{[]string{"--question", "--switch"}, "This option is not available."},
 		// zenity's own checks after parsing.
 		{[]string{"--info", "--cancel-label=No"}, "--cancel-label is not supported for this dialog"},
-		{[]string{"--entry", "--ellipsize"}, "--ellipsize is not supported for this dialog"},
+		// zenity names --no-wrap and --ellipsize from a table without them.
+		{[]string{"--entry", "--ellipsize"}, "--(null) is not supported for this dialog"},
 		{[]string{"--question", "--filename=x"}, "--filename is not supported for this dialog"},
 		{[]string{"--question", "--editable"}, "--editable is not supported for this dialog"},
-		// What galley does not do.
-		{[]string{"--list", "--column=a"}, "--list is a dialog galley does not stack"},
-		{[]string{"--text-info", "--editable"}, "--editable is not supported by galley"},
+		{[]string{"--question", "--percentage=3"}, "--percentage is not supported for this dialog"},
+		{[]string{"--info", "--font=x"}, "--font is not supported for this dialog"},
+		// --date-format is the calendar's; the form's is reached by its group.
+		{[]string{"--forms", "--date-format=%Y"}, "--date-format is not supported for this dialog"},
+		{[]string{"--about", "--version"}, "Two or more dialog options specified"},
+		// What galley never does.
 		{[]string{"--text-info", "--html"}, "--html is not supported by galley"},
-		{[]string{"--entry", "a", "b"}, "--entry with a list of values is not supported by galley"},
+		{[]string{"--text-info", "--url=https://example.com"}, "--url is not supported by galley"},
+		{[]string{"--info", "--no-interaction"}, "This option is not available."},
 		{append([]string{"--question"}, repeat("--extra-button=x", 15)...), "galley shows at most 16 buttons, and this dialog would have 17"},
 	} {
 		_, err := Parse(c.args, "/")

@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -134,11 +135,26 @@ type state struct {
 		Group   string `json:"group"`
 		Text    string `json:"text"`
 		Info    string `json:"info"`
+		Icon    string `json:"icon"`
 		Buttons []struct {
-			Label string `json:"label"`
-			Key   string `json:"key"`
+			Label   string `json:"label"`
+			Key     string `json:"key"`
+			Enabled bool   `json:"enabled"`
 		} `json:"buttons"`
+		Default   int             `json:"default"`
+		Connected bool            `json:"connected"`
+		Body      json.RawMessage `json:"body"`
 	} `json:"items"`
+}
+
+// body reads an item's own state, as its body (daemon/bodies.js) gives it.
+func body[T any](t *testing.T, raw json.RawMessage) T {
+	t.Helper()
+	var v T
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("body %s: %v", raw, err)
+	}
+	return v
 }
 
 func control(t *testing.T, command any) []byte {
@@ -252,6 +268,31 @@ func start(t *testing.T, stdin string, args ...string) *run {
 	return r
 }
 
+// startPiped is start with a stdin the test writes to as it goes.
+func startPiped(t *testing.T, args ...string) (*run, io.WriteCloser) {
+	t.Helper()
+	r := &run{cmd: exec.Command(client, args...), done: make(chan struct{})}
+	r.cmd.Env = append(clean(os.Environ()), "XDG_RUNTIME_DIR="+runtimeDir)
+	r.cmd.Stdout, r.cmd.Stderr = &r.stdout, &r.stderr
+	in, err := r.cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		r.cmd.Wait()
+		r.code = r.cmd.ProcessState.ExitCode()
+		close(r.done)
+	}()
+	t.Cleanup(func() {
+		in.Close()
+		r.cmd.Process.Kill()
+	})
+	return r, in
+}
+
 func (r *run) expect(t *testing.T, code int, stdout string) {
 	t.Helper()
 	select {
@@ -298,7 +339,7 @@ func TestTheAskersThreeAnswersStack(t *testing.T) {
 			t.Errorf("group = %q", it.Group)
 		}
 	}
-	if keys := fmt.Sprint(s.Items[0].Buttons); keys != "[{Refuse r} {Allow a} {Ask s}]" {
+	if keys := fmt.Sprint(s.Items[0].Buttons); keys != "[{Refuse r true} {Allow a true} {Ask s true}]" {
 		t.Errorf("buttons = %s", keys)
 	}
 
@@ -406,19 +447,20 @@ func TestAWithdrawnPasswordKeepsItsKeys(t *testing.T) {
 	r.expect(t, 1, "")
 }
 
-func TestASwitchWithNoButtonsCanBeClosed(t *testing.T) {
+// A --switch has only its extra buttons, and so no default: Enter answers
+// nothing.
+func TestASwitchHasOnlyItsButtons(t *testing.T) {
 	need(t)
-	r := start(t, "", "--question", "--switch")
+	r := start(t, "", "--question", "--switch", "--extra-button=One", "--extra-button=Two")
 	s := waitFor(t, "the question", items(1))
-	if fmt.Sprint(s.Items[0].Buttons) != "[{Close c}]" {
+	if fmt.Sprint(s.Items[0].Buttons) != "[{One o true} {Two t true}]" {
 		t.Errorf("buttons = %v", s.Items[0].Buttons)
 	}
-	// Enter closes nothing, as in zenity.
 	press(t, "Return")
 	time.Sleep(200 * time.Millisecond)
 	r.waiting(t)
-	press(t, "c")
-	r.expect(t, 1, "")
+	press(t, "t")
+	r.expect(t, 1, "Two\n")
 }
 
 func TestAHeldKeyAnswersOnce(t *testing.T) {

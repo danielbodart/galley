@@ -10,7 +10,8 @@ import System from 'system';
 
 import {Queue, waited} from '../daemon/queue.js';
 import {render, lines, buttonMarkup} from '../daemon/render.js';
-import {validate} from '../daemon/validate.js';
+import {validate, rows, progressUpdate, notify} from '../daemon/validate.js';
+import {formatDate} from '../daemon/dates.js';
 
 let failed = 0;
 function check(name, got, want) {
@@ -131,6 +132,59 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     bad('a key that is not one character', {buttons: [{answer: 'ok', label: 'x', key: 'xy'}]}, /longer/);
     bad('an underline past the label', {buttons: [{answer: 'ok', label: 'ab', underline: 2}]}, /underline/);
     bad('a huge text', {text: 'x'.repeat((1 << 20) + 1)}, /longer/);
+}
+
+// ---- the second protocol's items -------------------------------------------
+
+{
+    const v2 = raw => validate(raw, 2);
+    const list = v2({kind: 'list', buttons: [], list: {columns: ['a', 'b'], rows: [['1', '2'], ['3']],
+        type: 'check', hidden: [1], more: true}});
+    check('a list', [list.list.columns, list.list.rows, list.list.type, list.list.hidden, list.list.more],
+        [['a', 'b'], [['1', '2'], ['3']], 'check', [1], true]);
+    check('a combo is never hidden', v2({kind: 'entry', buttons: [], entry: {hidden: true, values: ['a']}}).entry,
+        {text: '', hidden: false, values: ['a']});
+    check('a first-protocol entry has no values', validate({kind: 'entry', buttons: [], entry: {values: ['a']}}).entry,
+        {text: '', hidden: false});
+    check('a form', v2({kind: 'forms', buttons: [], forms: {fields: [{kind: 'list', label: 'L'}, {kind: 'combo'}]}}).forms,
+        {dateFormat: '%x', fields: [
+            {kind: 'list', label: 'L', columns: ['column'], rows: [], showHeader: false, values: null},
+            {kind: 'combo', label: '', columns: ['column'], rows: [], showHeader: false, values: null}]});
+    check('a disabled button', v2({kind: 'progress', buttons: [{answer: 'ok', label: 'OK', disabled: true}]}).buttons[0].disabled,
+        true);
+    check('a first-protocol button is never disabled',
+        validate({kind: 'info', buttons: [{answer: 'ok', label: 'OK', disabled: true}]}).buttons[0].disabled, false);
+
+    const bad = (name, raw, pattern) => throws(name, () => v2(raw), pattern);
+    throws('a second-protocol kind in the first', () => validate({kind: 'scale', buttons: []}), /not one galley shows/);
+    bad('a list with no columns', {kind: 'list', buttons: [], list: {columns: []}}, /no columns/);
+    bad('a tick list of one column', {kind: 'list', buttons: [], list: {columns: ['a'], type: 'radio'}}, /two columns/);
+    bad('a row longer than the columns', {kind: 'list', buttons: [], list: {columns: ['a'], rows: [['1', '2']]}}, /at most 1/);
+    bad('a hidden column that is not one', {kind: 'list', buttons: [], list: {columns: ['a'], hidden: [1]}}, /hidden/);
+    bad('a field galley does not show', {kind: 'forms', buttons: [], forms: {fields: [{kind: 'slider'}]}}, /not a field/);
+    bad('a scale out of its range', {kind: 'scale', buttons: [], scale: {min: 0, max: 10, value: 11}}, /range/);
+    bad('a chooser starting somewhere relative', {kind: 'file', buttons: [], file: {mode: 'open', folder: 'tmp'}}, /absolute/);
+    bad('a chooser of an unknown mode', {kind: 'file', buttons: [], file: {mode: 'delete'}}, /mode/);
+    bad('a locale that is not one', {kind: 'calendar', buttons: [], locale: 'C; rm -rf /'}, /locale/);
+    bad('a percentage past 100', {kind: 'progress', buttons: [], progress: {percentage: 101}}, /percentage/);
+
+    check('rows', rows([['a'], []], 'rows', 1), [['a'], []]);
+    throws('rows too wide', () => rows([['a', 'b']], 'rows', 1), /at most 1/);
+    check('a progress update', progressUpdate({percentage: 50, text: '<b>x</b>', closed: true}),
+        {finished: false, closed: true, percentage: 50, text: '<b>x</b>'});
+    throws('a progress update past 100', () => progressUpdate({percentage: 200}), /percentage/);
+    check('a notification', notify({text: 'hi', icon: 'x', extra: 1}), {text: 'hi', icon: 'x'});
+}
+
+// ---- dates -------------------------------------------------------------------
+
+{
+    const date = GLib.DateTime.new_local(2024, 3, 5, 0, 0, 0);
+    check('a date', formatDate(date, '%Y-%m-%d %A', ''), '2024-03-05 Tuesday');
+    check('a date in C', formatDate(date, '%x', 'C'), '03/05/24');
+    // A locale the system does not have leaves the window's.
+    check('an unknown locale', formatDate(date, '%Y', 'xx_XX.UTF-8'), '2024');
+    check('a format GLib cannot write', formatDate(date, '%Q', ''), null);
 }
 
 if (failed) {

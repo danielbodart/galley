@@ -57,7 +57,8 @@ and its command line stays as it was.
 
 It never takes focus on its own. A question arriving adds a row and, when
 the window is not the one in front, a notification says something is
-waiting; the window is not raised for it. A dialog that appears under the
+waiting; the window is not raised for it. (A progress bar says nothing, and a
+notification says itself; see below.) A dialog that appears under the
 cursor is answered by whatever key was on its way -- the Enter that ends a
 command in a terminal -- and these questions exist for the presses that are
 meant. The notification is urgent, so GNOME shows it under Do Not Disturb
@@ -72,9 +73,12 @@ may say the window is ready rather than raise it.
 | key | |
 |---|---|
 | `j` / `k`, `↓` / `↑` | move through the queue |
-| `Enter` | the default button: OK, Yes or Allow, or Cancel with `--default-cancel`; or the focused button, once `Tab` has reached one |
+| `Alt` + `↓` / `↑` | the same, from a list, a calendar or a scale, which have the arrows while they have the focus |
+| `Enter` | the default button: OK, Yes or Allow, or Cancel with `--default-cancel`; or the focused button, once `Tab` has reached one; a new line in a field of several lines; the end of an edit in a list's cell |
 | a button's letter | that button: the label's mnemonic (`_Allow` is `a`), else its first letter no other button has; underlined on the button |
 | `Alt` + letter | the same, while typing in a field |
+| `Space` | tick or untick the selected row of a `--checklist`, or choose it in a `--radiolist` |
+| `/` | the search of the selected list |
 | `Page Up` / `Page Down` | scroll the selected question |
 | `Escape` | hide the window; nothing is answered |
 
@@ -88,10 +92,40 @@ rest of a password on its way lands nowhere rather than on the question
 beside it. A key held down answers one question, not one per repeat. `j` and
 `k` are never a button's.
 
+What is selected takes the focus that suits it: an entry, a password or a
+form's first field to be typed into, a list, a calendar or a scale to move
+through with the arrows; anything else leaves it on the queue, where letters
+are the buttons'. A row of a list is chosen with a click, a double click
+answers OK, and a click ticks a check or radio list's row.
+
 Questions are grouped by `--title` -- frisket's are all "Allow this
 request?", sudo's "Authentication Required" -- newest at the bottom, each
 showing how long it has waited. A client that is killed, or whose caller
 stops waiting, takes its question with it.
+
+Every one of zenity's dialogs is an item in the queue, the ones that ask
+nothing too, so that whatever arrives is worked through in the order it came:
+
+- **A progress bar** is a live item, fed from its stdin as zenity reads it --
+  a number sets the percentage, a `#` line the text, `pulsate:true` or
+  `pulsate:false` the bar's moving on its own -- with its bar in its row too.
+  Its OK is there to press once it reaches 100% or its stdin ends; with
+  `--auto-close` it goes by itself, and with `--auto-kill` its Cancel hangs
+  up on its caller (SIGHUP), as zenity's does.
+- **A file chooser** is an item saying what it asks for -- a file to open,
+  where to save, a folder; one or several; where it starts and with which
+  filters -- whose button opens GTK's own file chooser (`Gtk.FileDialog`,
+  through the desktop's portal on GNOME). What is chosen there answers it; a
+  chooser closed without choosing leaves it waiting.
+- **A notification** is an entry with its text and icon, there until you
+  dismiss it with its button. `galley --notification` returns at once, as
+  zenity does, and the entry outlives it; with `--listen` it reads zenity's
+  commands from stdin -- `message:` and `tooltip:` set the entry's text, a new
+  entry once the last is dismissed, `icon:` the icon of what follows,
+  `visible:` nothing, as in zenity 4.2 -- and returns when stdin ends. When
+  the window is not in front, a notification also goes to the desktop, with
+  its own text, at normal priority, and is withdrawn when the entry is
+  dismissed or the window comes forward.
 
 It looks as the desktop does: libadwaita's dark or light style, GNOME's
 accent colour and high contrast, followed as they change while the window is
@@ -101,19 +135,47 @@ set it; galley forces no colour scheme and draws no colours of its own.
 
 ## Compatibility
 
+All of zenity 4.2.2's command line but `--html` and `--url`, as zenity reads
+it: GOption's syntax, `--GROUP-OPTION` for an option of a group (zenity's own
+way to `--forms-date-format`), the same checks after parsing in the same
+order, the same warnings and the same words for each mistake -- compared
+with zenity's own over thousands of command lines.
+
 | | |
 |---|---|
-| **Dialogs** | `--question` (with `--switch`; with no `--extra-button` it gets a Close button, which exits as zenity's Escape does), `--info`, `--warning`, `--error`, `--entry`, `--text-info` |
-| **Options** | `--title`, `--text`, `--ok-label`, `--cancel-label`, `--extra-button` (repeatable), `--timeout`, `--width`, `--height`, `--icon`, `--no-markup`, `--no-wrap`, `--ellipsize`, `--default-cancel`, `--entry-text`, `--hide-text`, `--filename` (else stdin, read as it arrives), `--checkbox`, `--auto-scroll` |
-| **Exits** | 0 OK, 1 Cancel, 1 and the label on stdout for an extra button, 5 timed out, 255 a command-line error; `ZENITY_OK` / `DIALOG_OK` and the rest override each, as in zenity |
-| **Text** | As zenity 4.2 treats it: a message's `--text` has GLib's escapes undone (`\n`, `\t`, octal) and is markup, unless `--no-markup`, when it is taken as it is; an entry's `--text` has its escapes undone and is a mnemonic label (`__` is `_`); an entry's text is printed on OK and on timeout |
-| **Fitted** | what zenity takes and the window holds less of: a `--width` or `--height` beyond -1 to 100000 is that end of it; a `--title` or `--checkbox` over 1024 characters, or a button's label over 256, is cut short with an ellipsis (an extra button still prints its label whole) |
-| **Accepted, ignored** | every other zenity option, with any dialog, as zenity accepts them -- `--modal`, `--attach`, `--window-icon`, `--font`, … -- except where zenity itself refuses one for a dialog |
-| **Refused** | the dialogs that do not stack (`--list`, `--forms`, `--progress`, `--file-selection`, `--calendar`, …), `--editable`, `--html`, `--url`, an `--entry` given a list of values, and more than 16 buttons; each says so and exits 255 |
+| **Dialogs** | `--question` (with `--switch`), `--info`, `--warning`, `--error`, `--entry` (a combo when given values after its options), `--password`, `--text-info` (with `--editable`), `--list` (`--checklist`, `--radiolist`, `--imagelist`), `--forms`, `--calendar`, `--scale`, `--color-selection`, `--file-selection`, `--progress`, `--notification` (with `--listen`), `--about` |
+| **Options** | every one each dialog takes in zenity: `--title`, `--text`, `--ok-label`, `--cancel-label`, `--extra-button`, `--timeout`, `--width`, `--height`, `--icon` (and its deprecated `--window-icon` and `--icon-name`, with zenity's warnings), `--no-markup`, `--no-wrap`, `--ellipsize`, `--default-cancel`, `--entry-text`, `--hide-text`, `--filename` (else stdin, read as it arrives), `--checkbox`, `--auto-scroll`, `--username`; a list's `--column`, `--separator`, `--multiple`, `--editable`, `--print-column`, `--hide-column`, `--hide-header` and rows after the options or on stdin; a form's `--add-entry`, `--add-password`, `--add-multiline-entry`, `--add-calendar`, `--add-list`, `--list-values`, `--column-values`, `--show-header`, `--add-combo`, `--combo-values`, `--forms-date-format`; `--day`, `--month`, `--year`, `--date-format`; `--value`, `--min-value`, `--max-value`, `--step`, `--print-partial`, `--hide-value`; `--color`, `--show-palette`; `--save`, `--directory`, `--file-filter`; `--percentage`, `--pulsate`, `--auto-close`, `--auto-kill`, `--no-cancel`, `--time-remaining` |
+| **Output** | zenity's, dialog by dialog: a list's printed columns joined by the separator (its escapes undone), nothing when nothing is chosen; a form's fields joined by its separator, a list's cells each with a comma unless it is last; a date by `--date-format` (GLib's), else the locale's `%x`, in the caller's `LC_TIME`; a scale's value, and each as it moves with `--print-partial`; `user\|password`; `rgb(…)` or `rgba(…)`; the chosen paths joined by the separator; an editable text as it ends, with no newline added. On a timeout, what zenity prints then: an entry's, a list's, a form's, a calendar's, a scale's and an editable text's values; nothing for the rest |
+| **Exits** | 0 OK, 1 Cancel, 1 and the label on stdout for an extra button, 5 timed out, 255 a command-line error; `ZENITY_OK` / `DIALOG_OK` and the rest override each, as in zenity. What zenity refuses once its dialog has started is said as it says it and exits as it does: 0 for a list with no `--column`, a check or radio list with fewer than two, two list types, or a scale out of its range (zenity sets an error code and never reads it); 255 for `--auto-close --percentage=100`; 1 for a `--notification` with no text |
+| **Text** | As zenity 4.2 treats it: a message's `--text` has GLib's escapes undone (`\n`, `\t`, octal) and is markup, unless `--no-markup`, when it is taken as it is; a list's, a form's, a calendar's, a scale's and a progress bar's `--text` and `#` lines likewise, always as markup; an entry's `--text` has its escapes undone and is a mnemonic label (`__` is `_`); a notification's has its escapes undone and is plain, its first line the title; cells, labels and paths are plain |
+| **Fitted** | what zenity takes and the window holds less of: a `--width` or `--height` beyond -1 to 100000 is that end of it; a `--title` or `--checkbox` over 1024 characters, or a button's label over 256, is cut short with an ellipsis (an extra button still prints its label whole); a list holds at most 100000 rows |
+| **Refused** | `--html` and `--url`, which need WebKit, by name, and more than 16 buttons; each says so and exits 255 |
 | **No window** | when the window cannot be reached, galley exits 1 having said why, as zenity does when GTK has no display |
 
 galley reads zenity 4.2.2's command line; `galley --version` prints
-galley's own version.
+galley's own version, and `--about` is galley's.
+
+Where galley does otherwise, it is on purpose:
+
+- **A notification outlives its client**, as zenity's does in the desktop's
+  tray, and so is not withdrawn when its client is killed: it is the
+  person's to dismiss. `--notification --listen` returns when its stdin
+  ends, where zenity listens on, holding nothing, until it is killed.
+- **A progress bar, a file chooser and a notification are items**, so their
+  windows are galley's: the file chooser opens only when you ask for it,
+  rather than under the cursor, and the colour chooser is the same widget as
+  zenity's in the item's page.
+- **`--font` is ignored**, as it was before: a text in a size of the
+  caller's choosing could be made unreadable.
+- **A form's lists each take the `--column-values` of their own place**, or
+  the first. zenity reads the second list's from `--list-values` by mistake,
+  and crashes when there are none.
+- **A `--radiolist` with more than one TRUE** starts on the last of them, as
+  GTK's group makes it for the rows zenity draws at the start; the rows it
+  has not drawn are left unticked there whatever they say.
+- **Dates use the window's GLib**, switched to the caller's `LC_TIME` for
+  the moment of writing one when the window's system has that locale; the
+  calendar's own month and day names are the window's.
 
 ## How it works
 
@@ -134,7 +196,15 @@ socket itself.
 
 Everything the window renders arrives in its final form: zenity's escapes
 and mnemonics are undone in the client, where they are tested, and the
-window only draws.
+window only draws. What the window answers is what was chosen -- rows, a
+form's values, a date, paths -- and the client prints it as zenity would.
+
+The protocol (`internal/wire`) is versioned, each version the last with
+fields added. A client sends the lowest version its item needs, and the
+window takes any from the first to its own, so a client of either age
+reaches a window of either age for what both know: the window runs on
+across an upgrade, and the six dialogs of the first version still reach one
+started before the rest.
 
 ## Security
 
@@ -149,15 +219,19 @@ window only draws.
   the units start the window with it off (`GTK_A11Y=none`) unless
   `services.galley.accessibility` is set; a window started by hand has it
   on.
-- **Caller text is text.** Titles, bodies, labels and files are set as plain
-  text. Where zenity reads `--text` as markup, galley parses it with Pango
-  and keeps only emphasis -- bold, italic, underline, strikethrough,
-  monospace; colours, sizes, fonts and links never reach the screen, so a
-  question cannot hide part of itself. Markup that does not parse is shown as
-  written.
-- **A password is not kept.** A hidden entry's text goes from the field to
-  the client's stdout and nowhere else: never logged, never written to disk,
-  and cleared from the field the moment it is answered or withdrawn.
+- **Caller text is text.** Titles, bodies, labels, a list's cells, a form's
+  labels and files are set as plain text. Where zenity reads `--text` as
+  markup, galley parses it with Pango and keeps only emphasis -- bold,
+  italic, underline, strikethrough, monospace; colours, sizes, fonts and
+  links never reach the screen, so a question cannot hide part of itself.
+  Markup that does not parse is shown as written. An `--imagelist`'s first
+  column is a path the window loads as an image, as zenity's does, and a
+  notification's text is also the desktop notification's.
+- **A password is not kept.** A hidden entry's text, a `--password` item's
+  and a form's password go from the field to the client's stdout and nowhere
+  else: never logged, never in the window's state, never written to disk.
+  Every field an item has is cleared the moment it is answered or withdrawn,
+  and a file chooser still open is closed.
 - **A sandbox cannot ask.** A session sandboxed without
   `$XDG_RUNTIME_DIR` -- flong's, a container's -- cannot reach the socket,
   and that is the design: questions come from the host's own programs, such
@@ -206,7 +280,10 @@ its GSettings in a keyfile of its own. The end-to-end test's keys reach the
 window's own handler through the test control; what GTK does with a key the
 window leaves -- Enter on a focused button, a character in a field -- the
 control imitates rather than tests, since GTK 4 has no way to synthesise a
-key event.
+key event. What a person does to a list, a form, a calendar, a scale or a
+colour -- picking rows, typing in fields -- the control does to the widgets
+as they would; and it stands in for the file chooser, which on broadway has
+no portal to open.
 
 ## Licence
 

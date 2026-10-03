@@ -19,7 +19,9 @@
 // rather than handing the keys already on their way, an Enter or the rest of
 // a password, to whichever question stood next to it. A key held down
 // answers once, not once per repeat. A focused button is the exception to
-// Enter's default: Enter presses that button, as it would in any dialog.
+// Enter's default: Enter presses that button, as it would in any dialog;
+// and so are a field of several lines, where Enter is a new line, and a
+// list's cell being edited, where it ends the edit.
 //
 // ANSWERS ARE THIS WINDOW'S ALONE. Buttons answer through their own signal
 // handlers, never through a GAction: an application's actions are exported
@@ -27,6 +29,11 @@
 // press Allow. The only action is "show". GTK's accessibility bus is the
 // other way in -- it can click any button -- and the units start the window
 // with it off (GTK_A11Y=none; see nix/home.nix).
+//
+// Every one of zenity's dialogs is an item here, including those that ask
+// nothing: a progress bar is a live item until it is done and answered, and
+// a notification is an entry that stays, once its client has gone, until
+// the person dismisses it.
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -36,9 +43,40 @@ import Adw from 'gi://Adw?version=1';
 
 import {Queue, waited} from './queue.js';
 import {render, lines, buttonMarkup} from './render.js';
+import {makeBody, chooseFiles} from './bodies.js';
 
+// What takes typed text, where letters are not keys.
 const editsText = widget =>
     widget instanceof Gtk.Text || (widget instanceof Gtk.TextView && widget.editable);
+
+// Where Enter is the widget's: a new line in a field of several, the end of
+// an edit in a list's cell.
+const ownsEnter = widget =>
+    (widget instanceof Gtk.TextView && widget.editable) ||
+    (widget instanceof Gtk.Text && ancestor(widget, Gtk.EditableLabel));
+
+// Widgets that move within themselves by the arrows: a list's rows, a
+// calendar's days, a scale's value, a text's lines, a colour's swatches.
+// The arrows are theirs while they have the focus; j and k still move the
+// queue.
+const ARROWS = [Gtk.ColumnView, Gtk.ListView, Gtk.Calendar, Gtk.Range, Gtk.TextView,
+    Gtk.ComboBox, Gtk.DropDown, Gtk.ColorChooserWidget];
+const usesArrows = widget => ARROWS.some(type => ancestor(widget, type));
+
+function ancestor(widget, type) {
+    for (let w = widget; w; w = w.get_parent()) {
+        if (w instanceof type)
+            return w;
+        if (w instanceof Gtk.Window)
+            return null;
+    }
+    return null;
+}
+
+// Items that wait for an answer, which is what the notification that
+// something is waiting counts: not a progress bar, which is still going,
+// nor a notification, which says itself.
+const asks = item => item.kind !== 'progress' && item.kind !== 'notification';
 
 export class QueueWindow {
     constructor(app) {
@@ -49,6 +87,9 @@ export class QueueWindow {
         // Where the selected item was when its asker withdrew it, while
         // nothing has been picked since; -1 otherwise.
         this._parkedAt = -1;
+        // Opens GTK's file chooser for a file-selection item; the test
+        // control stands in for it.
+        this.chooseFiles = chooseFiles;
         this._build();
     }
 
@@ -73,7 +114,7 @@ export class QueueWindow {
                 return;
             }
             row.set_header(new Gtk.Label({
-                label: row._record.item.title || 'Untitled',
+                label: row._record.group || 'Untitled',
                 xalign: 0,
                 ellipsize: 3,
                 css_classes: ['heading'],
@@ -132,26 +173,88 @@ export class QueueWindow {
         this.window.connect('notify::is-active', () => {
             this._down.clear();
             if (this.window.is_active)
-                this.app.withdraw_notification('waiting');
+                this._withdrawNotifications();
         });
         this.window.connect('notify::visible', () => this._tick());
     }
 
     // ---- items --------------------------------------------------------
 
-    // Adds an item and returns its handle: append(text) for text-info read
-    // from stdin, timeout() to answer it as timed out, withdraw() when its
-    // client has gone. respond(answer) is called once, when it is answered.
-    add(item, respond) {
+    // Adds an item and returns its handle: what the client's lines change
+    // (append, rows, progress), timeout() to answer it as timed out, and
+    // withdraw() when its client has gone. client.answer(answer) is called
+    // once, when it is answered; client.tell(line) for a line before that.
+    add(item, client) {
+        const record = this._add(item, client);
+        const follow = record.body.follow ?? {};
+        return {
+            append: text => !record.done && follow.append?.(text),
+            rows: rows => !record.done && follow.rows?.(rows),
+            progress: update => !record.done && follow.progress?.(update),
+            timeout: () => this._finish(record, {answer: 'timeout'}, false),
+            // A notification outlives its client, as zenity's does: it is
+            // the person's to dismiss.
+            withdraw: () => {
+                if (record.item.kind === 'notification')
+                    record.client = null;
+                else
+                    this._remove(record, false);
+            },
+        };
+    }
+
+    // A --notification --listen: nothing until its first message, then one
+    // entry whose text each message replaces, as each replaces zenity's
+    // one notification -- or a new entry, once the person has dismissed it.
+    // Its entries stay when its client goes.
+    listen(item) {
+        let current = null;
+        return {
+            notify: message => {
+                const icon = message.icon || 'dialog-information';
+                if (current && !current.done) {
+                    current.item.text = message.text;
+                    current.item.icon = icon;
+                    this._setText(current, message.text, false);
+                    current.icon.set_from_gicon(gicon(icon));
+                    this._notify(current);
+                } else {
+                    current = this._add({...item, text: message.text, icon, markup: false}, null);
+                }
+            },
+            withdraw: () => {},
+        };
+    }
+
+    _add(item, client) {
         const record = {
             id: `item-${this._next++}`,
             item,
             group: item.title,
             arrived: GLib.get_monotonic_time(),
-            respond,
+            client,
             done: false,
             waitLabels: [],
+            default: item.default,
         };
+        record.body = makeBody(item, {
+            window: this,
+            record,
+            press: answer => {
+                const spec = item.buttons.find(b => b.answer === answer);
+                if (spec)
+                    this._press(record, spec);
+                else if (answer === 'ok')
+                    this._finish(record, {answer: 'ok'}, true);
+            },
+            finish: answer => this._finish(record, answer, true),
+            tell: line => {
+                if (!record.done)
+                    record.client?.tell(line);
+            },
+            setText: (text, markup) => this._setText(record, text, markup),
+            setButton: (answer, how) => this._setButton(record, answer, how),
+        });
         record.row = this._row(record);
         record.page = this._page(record);
 
@@ -169,46 +272,48 @@ export class QueueWindow {
         if (!this.list.get_selected_row() && this._parkedAt < 0)
             this.list.select_row(record.row);
         this._title();
-        this._notify();
-
-        return {
-            append: text => this._append(record, text),
-            timeout: () => this._finish(record, {answer: 'timeout'}, false),
-            withdraw: () => this._remove(record, false),
-        };
+        this._notify(record);
+        return record;
     }
 
     _row(record) {
         const {item} = record;
         const box = new Gtk.Box({spacing: 8, margin_top: 6, margin_bottom: 6, margin_start: 6, margin_end: 6});
-        // Its first two lines of text, which for frisket's asker are the
-        // workspace and what the request does.
-        const shown = item.kind === 'text'
-            ? item.info.text ?? ''
-            : render(item.text ?? '', item.markup).text;
-        const [first, second] = lines(shown, 2);
         box.append(new Gtk.Image({icon_name: symbolic(item), valign: Gtk.Align.START}));
         const words = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, hexpand: true});
-        words.append(new Gtk.Label({
-            label: first || item.title || 'Untitled', xalign: 0, ellipsize: 3, single_line_mode: true,
-        }));
-        if (second) {
-            words.append(new Gtk.Label({
-                label: second, xalign: 0, ellipsize: 3, single_line_mode: true,
-                css_classes: ['dim-label', 'caption'],
-            }));
-        }
+        record.rowFirst = new Gtk.Label({xalign: 0, ellipsize: 3, single_line_mode: true});
+        record.rowSecond = new Gtk.Label({
+            xalign: 0, ellipsize: 3, single_line_mode: true, css_classes: ['dim-label', 'caption'],
+        });
+        words.append(record.rowFirst);
+        words.append(record.rowSecond);
+        if (record.body.rowWidget)
+            words.append(record.body.rowWidget);
         box.append(words);
         const wait = new Gtk.Label({css_classes: ['dim-label', 'numeric', 'caption'], valign: Gtk.Align.START});
         box.append(wait);
         record.waitLabels.push(wait);
+        this._rowText(record);
         const row = new Gtk.ListBoxRow({child: box});
         row._record = record;
         return row;
     }
 
-    _page(record) {
+    // A row's first two lines of text, which for frisket's asker are the
+    // workspace and what the request does.
+    _rowText(record) {
         const {item} = record;
+        const shown = item.kind === 'text'
+            ? item.info.text ?? ''
+            : render(item.text ?? '', item.markup).text;
+        const [first, second] = lines(shown, 2);
+        record.rowFirst.set_text(first || item.title || 'Untitled');
+        record.rowSecond.set_text(second ?? '');
+        record.rowSecond.visible = Boolean(second);
+    }
+
+    _page(record) {
+        const {item, body} = record;
         const page = new Gtk.Box({
             orientation: Gtk.Orientation.VERTICAL,
             spacing: 12,
@@ -216,7 +321,8 @@ export class QueueWindow {
         });
 
         const head = new Gtk.Box({spacing: 12});
-        head.append(icon(item.icon, item.kind));
+        record.icon = icon(item.icon, item.kind);
+        head.append(record.icon);
         const heading = new Gtk.Box({orientation: Gtk.Orientation.VERTICAL, valign: Gtk.Align.CENTER});
         heading.append(new Gtk.Label({
             label: item.title || 'Untitled', xalign: 0, wrap: true, wrap_mode: 2, css_classes: ['title-3'],
@@ -227,67 +333,41 @@ export class QueueWindow {
         head.append(heading);
         page.append(head);
 
-        let scroller = null;
-        if (item.text) {
-            const {text, attributes} = render(item.text, item.markup);
-            const label = new Gtk.Label({
-                xalign: 0, yalign: 0, selectable: false, use_markup: false, use_underline: false,
-                wrap: !item.noWrap && !item.ellipsize, wrap_mode: 2,
-                ellipsize: item.ellipsize ? 3 : 0,
-            });
-            label.set_text(text);
-            if (attributes)
-                label.set_attributes(attributes);
-            scroller = new Gtk.ScrolledWindow({
-                child: label,
-                vexpand: item.kind !== 'text' && item.kind !== 'entry',
-                propagate_natural_height: true,
-                hscrollbar_policy: item.noWrap ? Gtk.PolicyType.AUTOMATIC : Gtk.PolicyType.NEVER,
-            });
-            page.append(scroller);
-        }
+        record.label = new Gtk.Label({
+            xalign: 0, yalign: 0, selectable: false, use_markup: false, use_underline: false,
+            wrap: !item.noWrap && !item.ellipsize, wrap_mode: 2,
+            ellipsize: item.ellipsize ? 3 : 0,
+        });
+        const textScroller = new Gtk.ScrolledWindow({
+            child: record.label,
+            vexpand: !body.expands && !body.widget,
+            propagate_natural_height: true,
+            hscrollbar_policy: item.noWrap ? Gtk.PolicyType.AUTOMATIC : Gtk.PolicyType.NEVER,
+        });
+        page.append(textScroller);
+        record.textScroller = textScroller;
+        this._setText(record, item.text ?? '', item.markup);
 
-        if (item.kind === 'entry') {
-            const entry = item.entry.hidden
-                ? new Gtk.PasswordEntry({show_peek_icon: true})
-                : new Gtk.Entry();
-            if (item.entry.text)
-                entry.set_text(item.entry.text);
-            record.entry = entry;
-            page.append(entry);
-            page.append(new Gtk.Box({vexpand: true}));
+        if (body.widget) {
+            page.append(body.widget);
+            if (!body.expands)
+                page.append(new Gtk.Box({vexpand: true}));
         }
-
-        if (item.kind === 'text') {
-            const view = new Gtk.TextView({
-                editable: false, cursor_visible: false, monospace: true,
-                wrap_mode: item.noWrap ? Gtk.WrapMode.NONE : Gtk.WrapMode.WORD_CHAR,
-                top_margin: 6, bottom_margin: 6, left_margin: 6, right_margin: 6,
-            });
-            view.buffer.set_text(item.info.text ?? '', -1);
-            record.view = view;
-            scroller = new Gtk.ScrolledWindow({child: view, vexpand: true, css_classes: ['card']});
-            page.append(scroller);
-            if (item.info.checkbox) {
-                record.checkbox = new Gtk.CheckButton({label: item.info.checkbox, use_underline: false});
-                page.append(record.checkbox);
-            }
-        }
-        record.scroller = scroller;
+        record.scroller = body.scroller ?? textScroller;
 
         const buttons = new Gtk.Box({spacing: 8, halign: Gtk.Align.END});
         record.buttons = item.buttons.map((spec, i) => {
             const label = new Gtk.Label();
             label.set_markup(buttonMarkup(GLib, spec.label, spec.underline));
-            const button = new Gtk.Button({child: label, focus_on_click: false});
-            if (i === item.default)
+            const button = new Gtk.Button({child: label, focus_on_click: false, sensitive: !spec.disabled});
+            if (i === record.default)
                 button.add_css_class('suggested-action');
             button.connect('clicked', () => this._press(record, spec));
             buttons.append(button);
-            if (spec.answer === 'ok' && record.checkbox) {
+            if (spec.answer === 'ok' && body.checkbox) {
                 button.sensitive = false;
-                record.checkbox.connect('toggled', () => {
-                    button.sensitive = record.checkbox.active;
+                body.checkbox.connect('toggled', () => {
+                    button.sensitive = body.checkbox.active;
                 });
             }
             return button;
@@ -296,19 +376,43 @@ export class QueueWindow {
         return page;
     }
 
-    _append(record, text) {
-        if (record.done || !record.view)
-            return;
-        const buffer = record.view.buffer;
-        buffer.insert(buffer.get_end_iter(), text, -1);
-        if (record.item.info.autoScroll)
-            record.view.scroll_to_mark(buffer.get_insert(), 0, false, 0, 0);
+    // An item's text, replaced: a progress item's "#" lines, a listening
+    // notification's messages.
+    _setText(record, text, markup) {
+        record.item.text = text;
+        record.item.markup = markup;
+        const rendered = render(text, markup);
+        record.label.set_text(rendered.text);
+        record.label.set_attributes(rendered.attributes);
+        record.textScroller.visible = rendered.text !== '';
+        this._rowText(record);
     }
 
-    // A button pressed, by click or key. An OK held back by an unticked
-    // --checkbox stays held back whichever way it is pressed.
+    // A button enabled or disabled, and made the default: a progress
+    // item's OK once it is done, its Cancel once its stdin is.
+    _setButton(record, answer, {enabled, isDefault}) {
+        const i = record.item.buttons.findIndex(b => b.answer === answer);
+        if (i < 0)
+            return;
+        record.buttons[i].sensitive = enabled;
+        if (isDefault) {
+            record.buttons[record.default]?.remove_css_class('suggested-action');
+            record.default = i;
+            record.buttons[i].add_css_class('suggested-action');
+        }
+    }
+
+    // A button pressed, by click or key. One that is disabled -- an OK held
+    // back by an unticked --checkbox, a progress bar's OK before it is done
+    // -- stays so whichever way it is pressed. A body may take the press
+    // itself: the file chooser's Open… opens the chooser.
     _press(record, spec) {
-        if (record.checkbox && spec.answer === 'ok' && !record.checkbox.active)
+        if (record.done)
+            return;
+        const i = record.item.buttons.indexOf(spec);
+        if (i >= 0 && !record.buttons[i].sensitive)
+            return;
+        if (record.body.press?.(spec))
             return;
         const answer = {answer: spec.answer};
         if (spec.answer === 'extra')
@@ -320,9 +424,9 @@ export class QueueWindow {
     _finish(record, answer, byPerson) {
         if (record.done)
             return;
-        if (record.entry && (answer.answer === 'ok' || answer.answer === 'timeout'))
-            answer.entry = record.entry.get_text();
-        record.respond(answer);
+        if (answer.answer === 'ok' || answer.answer === 'timeout')
+            record.body.values?.(answer);
+        record.client?.answer(answer);
         this._remove(record, byPerson);
     }
 
@@ -334,18 +438,18 @@ export class QueueWindow {
         if (record.done)
             return;
         record.done = true;
-        // A hidden entry's text is cleared from its widget the moment it is
-        // answered or withdrawn, rather than left for the collector.
-        if (record.entry) {
-            record.entry.set_text('');
-            record.entry = null;
-        }
+        // What was typed -- a password above all -- is cleared from its
+        // widget the moment it is answered or withdrawn, rather than left
+        // for the collector; and a chooser still open is closed.
+        record.body.clear?.();
+        if (record.noted)
+            this.app.withdraw_notification(record.id);
         const wasSelected = this.list.get_selected_row() === record.row;
         const at = this.queue.remove(record);
         this.list.remove(record.row);
         this.list.invalidate_headers();
         this.stack.remove(record.page);
-        record.respond = null;
+        record.client = null;
 
         if (this.queue.length === 0) {
             this._parkedAt = -1;
@@ -376,10 +480,11 @@ export class QueueWindow {
         const record = row._record;
         this.stack.set_visible_child_name(record.id);
         this.content.title = record.item.title || 'Untitled';
-        // An entry is ready to type into; anything else leaves the focus on
-        // the list, where letters are keys.
-        if (record.entry)
-            record.entry.grab_focus();
+        // A field is ready to type into, a list or a calendar to move
+        // through; anything else leaves the focus on the queue's row,
+        // where letters are keys.
+        if (record.body.focus)
+            record.body.focus.grab_focus();
         else if (this.window.get_focus() !== row)
             row.grab_focus();
     }
@@ -404,23 +509,25 @@ export class QueueWindow {
         if (state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SUPER_MASK))
             return false;
         const alt = (state & Gdk.ModifierType.ALT_MASK) !== 0;
-        const editing = editsText(this.window.get_focus());
+        const focus = this.window.get_focus();
+        const editing = editsText(focus);
         const record = this.current();
 
         switch (name) {
-        case 'Up': case 'KP_Up':
-            this.move(-1);
-            return true;
-        case 'Down': case 'KP_Down':
-            this.move(1);
+        case 'Up': case 'KP_Up': case 'Down': case 'KP_Down':
+            // A list, a calendar or a scale with the focus moves itself.
+            if (!alt && usesArrows(focus))
+                return false;
+            this.move(name.endsWith('Up') ? -1 : 1);
             return true;
         case 'Return': case 'KP_Enter': case 'ISO_Enter':
             // A button Tab has reached is pressed by Enter itself, as GTK
-            // does: Enter on a focused Refuse must not Allow.
-            if (isButton(this.window.get_focus()))
+            // does: Enter on a focused Refuse must not Allow. A field of
+            // several lines takes it as a new line.
+            if (isButton(focus) || ownsEnter(focus))
                 return false;
-            if (record && !repeat && record.item.default >= 0)
-                this._press(record, record.item.buttons[record.item.default]);
+            if (record && !repeat && record.default >= 0)
+                this._press(record, record.item.buttons[record.default]);
             return true;
         case 'Page_Up': case 'Page_Down':
             if (record?.scroller) {
@@ -429,6 +536,13 @@ export class QueueWindow {
                 adj.value = Math.max(adj.lower, Math.min(adj.upper - adj.page_size, adj.value + by));
             }
             return true;
+        case 'slash':
+            // A list's search.
+            if (!editing && record?.body.search) {
+                record.body.search.grab_focus();
+                return true;
+            }
+            break;
         }
 
         if (!editing && !alt) {
@@ -478,7 +592,7 @@ export class QueueWindow {
         if (token)
             this.window.set_startup_id(token);
         this.window.present();
-        this.app.withdraw_notification('waiting');
+        this._withdrawNotifications();
     }
 
     hide() {
@@ -490,21 +604,50 @@ export class QueueWindow {
         this.window.title = n ? `galley (${n} waiting)` : 'galley';
     }
 
-    // Says something is waiting, when the window is not already in front.
+    // Says something has arrived, when the window is not already in front.
     // Only with a session bus: a notification goes over it.
-    _notify() {
+    //
+    // For a question, the one notification that questions are waiting, with
+    // no word of theirs in it, urgent: a caller is blocked until it is
+    // answered, and nothing else on screen says so. For a notification, its
+    // own text, at normal priority, as zenity's would have been; it is
+    // withdrawn when the entry is dismissed, or the window comes forward.
+    // A progress bar says nothing: it is still going.
+    _notify(record) {
         if (this.window.is_active || !this.app.get_dbus_connection())
             return;
-        const n = this.queue.length;
+        const {item} = record;
+        if (item.kind === 'notification') {
+            const [title, ...body] = (item.text ?? '').split('\n');
+            const notification = new Gio.Notification();
+            notification.set_title(title);
+            if (body.length)
+                notification.set_body(body.join('\n'));
+            notification.set_icon(gicon(item.icon || 'dialog-information'));
+            notification.set_default_action('app.show');
+            this.app.send_notification(record.id, notification);
+            record.noted = true;
+            return;
+        }
+        if (!asks(item))
+            return;
+        const n = this.queue.items.filter(r => asks(r.item)).length;
         const notification = new Gio.Notification();
         notification.set_title(n === 1 ? 'A question is waiting' : `${n} questions are waiting`);
         notification.set_body('Open galley to answer.');
         notification.set_default_action('app.show');
-        // Urgent, so that Do Not Disturb still shows it and it stays until
-        // dismissed: a caller is blocked until it is answered, and nothing
-        // else on screen says so.
         notification.set_priority(Gio.NotificationPriority.URGENT);
         this.app.send_notification('waiting', notification);
+    }
+
+    _withdrawNotifications() {
+        this.app.withdraw_notification('waiting');
+        for (const record of this.queue.items) {
+            if (record.noted) {
+                this.app.withdraw_notification(record.id);
+                record.noted = false;
+            }
+        }
     }
 
     // The first item to ask for more room than the window has gets it, if
@@ -555,8 +698,14 @@ export class QueueWindow {
                 title: r.item.title,
                 group: r.group,
                 text: render(r.item.text ?? '', r.item.markup).text,
-                info: r.view ? r.view.buffer.text : undefined,
-                buttons: r.item.buttons.map(b => ({label: b.label, key: b.key ?? ''})),
+                info: r.item.kind === 'text' ? r.body.state().text : undefined,
+                icon: r.item.icon,
+                buttons: r.item.buttons.map((b, i) => ({
+                    label: b.label, key: b.key ?? '', enabled: r.buttons[i].sensitive,
+                })),
+                default: r.default,
+                connected: r.client !== null,
+                body: r.body.state?.(),
             })),
         };
     }
@@ -578,28 +727,46 @@ function describe(widget, record, withdrawn) {
     const i = record?.buttons?.indexOf(widget) ?? -1;
     if (i >= 0)
         return `button:${record.item.buttons[i].label}`;
+    for (const type of ARROWS) {
+        const w = ancestor(widget, type);
+        if (w)
+            return w.constructor.name.replace(/^Gtk_?/, '');
+    }
     return widget.constructor.name;
+}
+
+// A theme icon's name or a file's path, as a GIcon.
+function gicon(name) {
+    if (name.startsWith('/'))
+        return Gio.FileIcon.new(Gio.File.new_for_path(name));
+    return Gio.ThemedIcon.new_with_default_fallbacks(name);
 }
 
 // An item's icon: a file when the name is a path, else a theme icon.
 function icon(name, kind) {
     const image = new Gtk.Image({pixel_size: 48, valign: Gtk.Align.START});
-    if (name && name.startsWith('/'))
-        image.set_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(name)));
-    else
-        image.set_from_gicon(Gio.ThemedIcon.new_with_default_fallbacks(name || fallbackIcon[kind]));
+    image.set_from_gicon(gicon(name || fallbackIcon[kind] || 'dialog-question'));
     return image;
 }
 
 const fallbackIcon = {
     question: 'dialog-question', info: 'dialog-information', warning: 'dialog-warning',
     error: 'dialog-error', entry: 'insert-text', text: 'accessories-text-editor',
+    list: 'view-list', forms: 'document-edit', calendar: 'x-office-calendar',
+    scale: 'dialog-question', password: 'dialog-password', color: 'applications-graphics',
+    file: 'document-open', progress: 'appointment-soon', notification: 'dialog-information',
+    about: 'help-about',
 };
 
 const symbolicIcon = {
     question: 'dialog-question-symbolic', info: 'dialog-information-symbolic',
     warning: 'dialog-warning-symbolic', error: 'dialog-error-symbolic',
     entry: 'document-edit-symbolic', text: 'text-x-generic-symbolic',
+    list: 'view-list-symbolic', forms: 'document-edit-symbolic',
+    calendar: 'x-office-calendar-symbolic', scale: 'view-continuous-symbolic',
+    password: 'dialog-password-symbolic', color: 'color-select-symbolic',
+    file: 'document-open-symbolic', progress: 'content-loading-symbolic',
+    notification: 'preferences-system-notifications-symbolic', about: 'help-about-symbolic',
 };
 
 function symbolic(item) {
