@@ -49,9 +49,20 @@ One of each of the other dialogs, as the page on the right shows it:
 A file chooser's page says what it asks for, and its button opens GTK's own
 chooser; `--info` is laid out as `--warning` is, under an icon of its own.
 
-## Example
+## Install
 
-With home-manager:
+### With Nix
+
+Add the flake as an input:
+
+```nix
+{
+  inputs.galley.url = "github:danielbodart/galley";
+}
+```
+
+With home-manager, the module installs galley and the socket that starts
+its window on the first question:
 
 ```nix
 {
@@ -60,7 +71,47 @@ With home-manager:
 }
 ```
 
-Then, anywhere zenity was called:
+Without it, take the package -- `galley.packages.${system}.default`, in
+`home.packages` or `environment.systemPackages` -- and enable the user units
+it carries in `share/systemd/user`. Or try it once, starting the window by
+hand:
+
+```console
+$ nix shell github:danielbodart/galley
+$ galley-daemon &
+$ galley --info --text="Hello"
+```
+
+Every green build of `trunk` is a release, tagged `v0.N.M`, so a version can
+be pinned: `github:danielbodart/galley/v0.N.M`.
+
+### Without Nix
+
+Each release carries a tarball for x86_64 and aarch64 with an installer:
+
+```console
+$ curl -fsSL https://github.com/danielbodart/galley/releases/latest/download/galley-linux-$(uname -m).tar.gz | tar -xz
+$ ./galley-*/install.sh
+```
+
+It installs into `~/.local` (`--prefix=/usr/local`, as root, for everyone),
+enables the window's socket with `systemctl --user`, and takes itself away
+again with `--uninstall`. Before it copies anything it checks for what the
+window needs:
+
+- **gjs** 1.70 or later
+- **GTK 4.12** or later
+- **libadwaita 1.4** or later
+- their GObject introspection data, the typelibs gjs loads them by
+- a **systemd** user session and a session **D-Bus**, to start the window
+  by its socket; `galley-daemon` can be run by hand without them
+
+The client, `galley`, is a static binary and needs nothing. On GNOME the
+tray icon shows with the AppIndicator extension.
+
+## Example
+
+Anywhere zenity was called:
 
 ```console
 $ galley --question --title="Allow this request?" --no-markup \
@@ -209,8 +260,8 @@ with zenity's own over thousands of command lines.
 | **Refused** | `--html` and `--url`, which need WebKit, by name, and more than 16 buttons; each says so and exits 255 |
 | **No window** | when the window cannot be reached, galley exits 1 having said why, as zenity does when GTK has no display |
 
-galley reads zenity 4.2.2's command line; `galley --version` prints
-galley's own version, and `--about` is galley's.
+`galley --version` prints galley's own version, `MAJOR.COMMITS.BUILD`, and
+`--about` is galley's.
 
 Where galley does otherwise, it is on purpose:
 
@@ -331,8 +382,10 @@ $ GALLEY_E2E_DAEMON="gjs -m $PWD/daemon/main.js" \
   GALLEY_E2E_BROADWAYD=$(command -v gtk4-broadwayd) go test -v ./tests/
 $ nix flake check      # build, client tests, vet, gofmt, the window's units,
                        # the end-to-end test on GTK's broadway backend, the
-                       # appearance test, and
-                       # the home-manager module's units
+                       # appearance test, the home-manager module's units,
+                       # shellcheck, and the release tarball installed
+$ scripts/version.sh   # MAJOR (./VERSION) . commit count . CI run number
+$ scripts/dist.sh 0.1.2 x86_64   # a release tarball, into dist/
 ```
 
 The end-to-end and appearance tests run the real window on broadway, which

@@ -8,8 +8,13 @@
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
 
-      # The MAJOR only; 0 says the interfaces are still moving.
-      version = nixpkgs.lib.fileContents ./VERSION;
+      # MAJOR.MINOR.PATCH as scripts/version.sh makes it, as far as Nix can:
+      # the MAJOR is committed, 0 saying the interfaces are still moving; the
+      # MINOR, the commit count, Nix knows only from a git+ ref (a github:
+      # ref, or a tag of a release, gives none, so 0); the PATCH, CI's run
+      # number, it never knows. The release tarballs carry the whole of it.
+      major = nixpkgs.lib.fileContents ./VERSION;
+      version = "${major}.${toString (self.revCount or 0)}.0";
 
       # What the window is built of: GJS, and the libraries it reaches
       # through GObject introspection.
@@ -194,6 +199,40 @@
               runHook postCheck
             '';
           });
+
+          shellcheck = pkgs.runCommand "galley-shellcheck"
+            { nativeBuildInputs = [ pkgs.shellcheck ]; }
+            ''
+              cd ${./.}
+              shellcheck scripts/*.sh packaging/install.sh packaging/galley-daemon
+              touch $out
+            '';
+
+          # The release tarball for a system without Nix, as CI makes it,
+          # installed into a prefix and taken out again: the client says the
+          # version it was given, the units and desktop file name where the
+          # programs went, and the test control stays behind.
+          dist = pkgs.runCommand "galley-dist"
+            {
+              nativeBuildInputs = [ pkgs.go pkgs.gjs pkgs.gobject-introspection ];
+              buildInputs = windowInputs pkgs;
+            }
+            ''
+              export HOME=$TMPDIR GOCACHE=$TMPDIR/go-cache GOPROXY=off
+              cp -r ${./.} src && chmod -R u+w src
+              arch=${pkgs.stdenv.hostPlatform.uname.processor}
+              bash src/scripts/dist.sh 7.8.9 "$arch" out
+              tar -xzf out/galley-linux-$arch.tar.gz
+              p=$TMPDIR/prefix
+              sh galley-7.8.9/install.sh --prefix=$p --no-systemd
+              [ "$($p/bin/galley --version)" = 7.8.9 ]
+              grep -qx "ExecStart=$p/bin/galley-daemon" $p/share/systemd/user/galley.service
+              grep -qx "Exec=$p/bin/galley --show" $p/share/applications/io.github.danielbodart.Galley.desktop
+              [ -f $p/share/galley/main.js ] && [ ! -e $p/share/galley/test-control.js ]
+              sh galley-7.8.9/install.sh --prefix=$p --no-systemd --uninstall
+              [ -z "$(find $p -type f)" ]
+              touch $out
+            '';
 
           # The home-manager module's units, as written: the socket in the
           # private runtime directory, the service running the window.

@@ -1,0 +1,5 @@
+#!/bin/sh
+# galley's window: GJS running the sources installed beside this, in
+# ../share/galley. The system's gjs, GTK 4 and libadwaita draw it.
+here=$(dirname "$(readlink -f "$0")")
+exec gjs -m "$here/../share/galley/main.js" "$@"

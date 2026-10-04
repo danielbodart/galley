@@ -84,7 +84,7 @@ func Main(args []string, env Env) int {
 
 const usage = `Usage: galley DIALOG [OPTION…] [VALUE…]
 
-A zenity drop-in whose dialogs stack in one window. It reads zenity 4.2's
+A zenity drop-in whose dialogs stack in one window. It reads zenity's
 command line and exits and prints as zenity does: see zenity's own --help
 for its options.
 
@@ -205,9 +205,8 @@ func ask(inv *zenity.Invocation, env Env) int {
 	case wire.KindCalendar, wire.KindForms:
 		item.Locale = locale(env.Getenv)
 	case wire.KindAbout:
-		item.Text = fmt.Sprintf("galley %s\n\nA zenity drop-in whose dialogs stack in one window. "+
-			"It reads zenity %s's command line.\n\nhttps://github.com/danielbodart/galley\nMIT licence",
-			env.Version, zenity.Version)
+		item.Text = fmt.Sprintf("galley %s\n\nA zenity drop-in whose dialogs stack in one window."+
+			"\n\nhttps://github.com/danielbodart/galley\nMIT licence", env.Version)
 	}
 
 	path, err := Socket(env.Getenv)

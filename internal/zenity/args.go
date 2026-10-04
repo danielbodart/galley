@@ -759,6 +759,3 @@ func or(given bool, value, fallback string) string {
 	}
 	return fallback
 }
-
-// Version is the zenity whose command line galley reads.
-const Version = "4.2.2"

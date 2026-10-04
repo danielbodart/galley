@@ -20,6 +20,60 @@ jobs:
       # The build and the client's tests, vet and gofmt, the window's own
       # units under gjs, the end-to-end test on GTK's broadway backend (no
       # display needed), the window following the desktop's dark style, accent
-      # and contrast, and the home-manager module's units.
+      # and contrast, the home-manager module's units, shellcheck, and the
+      # release tarball installed and uninstalled.
       - name: nix flake check
         run: nix flake check --print-build-logs
+
+  # Every green push to trunk is a release: v$(scripts/version.sh), tagged on
+  # the commit, with a tarball per architecture for a system without Nix
+  # (see packaging/install.sh). Nix users take the flake, at trunk or at the
+  # tag.
+  release:
+    needs: [check]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/trunk' && needs.check.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # fetch-depth: 0 because the minor is the commit count and the script
+      # REFUSES a shallow clone; fetch-tags so the previous tag resolves when
+      # the notes are generated below.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # Go from the flake's own nixpkgs, so the release is built by the same
+      # Go as the checks. The client cross-compiles; the window is the same
+      # JavaScript for both.
+      - name: Build the tarballs
+        run: |
+          V="$(./scripts/version.sh)"
+          echo "V=$V" >> "$GITHUB_ENV"
+          for arch in x86_64 aarch64; do
+            nix shell --inputs-from . nixpkgs#go -c ./scripts/dist.sh "$V" "$arch" dist
+          done
+          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
+
+      # Notes from the COMMITS since the last release. Trunk-based means direct
+      # pushes and no pull requests, so GitHub's PR-based --generate-notes
+      # would come out empty. On the first release there is no prior tag, so
+      # fall back to the head commit rather than dumping the whole history.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV="$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)"
+          if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
+            git log "$PREV..HEAD" --pretty='- %s (%h)' > notes.md
+          else
+            { echo 'First automated release.'; echo; git log -1 --pretty='- %s (%h)'; } > notes.md
+          fi
+          gh release create "v$V" --title "v$V" --notes-file notes.md --target "$GITHUB_SHA" \
+            dist/*.tar.gz dist/SHA256SUMS
