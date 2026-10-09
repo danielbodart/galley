@@ -8,11 +8,16 @@
 // A conversation is the item: the window answers it on the connection that
 // asked, and a connection that closes first takes its item away unanswered.
 // See wire for the lines in each direction.
+//
+// $GALLEY_SERVICES_SOCKET, when set, is a second socket, for system users'
+// services: bound here, open to every user, and served only to those
+// $GALLEY_SERVICES names (services.js).
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
 import {validate, rows, progressUpdate, notify} from './validate.js';
+import {fromService} from './services.js';
 
 Gio._promisify(Gio.DataInputStream.prototype, 'read_line_async', 'read_line_finish_utf8');
 
@@ -36,6 +41,29 @@ export class Server {
             return true;
         });
         this.bound = null;
+        this.services = null;
+        this.servicesBound = null;
+    }
+
+    // Binds path for the services in admitted, a map of uid to {name,
+    // label}, replacing whatever file is there.
+    listenServices(path, admitted) {
+        try {
+            Gio.File.new_for_path(path).delete(null);
+        } catch (e) {
+            // Nothing there.
+        }
+        this.services = new Gio.SocketService();
+        this.services.connect('incoming', (_service, connection) => {
+            this._serve(connection, admitted).catch(e => logError(e, 'galley: a service'));
+            return true;
+        });
+        this.services.add_address(new Gio.UnixSocketAddress({path}),
+            Gio.SocketType.STREAM, Gio.SocketProtocol.DEFAULT, null);
+        this.servicesBound = path;
+        Gio.File.new_for_path(path).set_attribute_uint32('unix::mode', 0o666,
+            Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
+        this.services.start();
     }
 
     // Takes systemd's socket when there is one, else binds path. Throws when
@@ -86,22 +114,31 @@ export class Server {
     }
 
     close() {
-        this.service.stop();
-        this.service.close();
-        if (this.bound) {
+        for (const service of [this.service, this.services]) {
+            service?.stop();
+            service?.close();
+        }
+        for (const path of [this.bound, this.servicesBound]) {
+            if (!path)
+                continue;
             try {
-                Gio.File.new_for_path(this.bound).delete(null);
+                Gio.File.new_for_path(path).delete(null);
             } catch (e) {
                 // Already gone.
             }
         }
     }
 
-    async _serve(connection) {
-        // The directory already keeps everyone else out; this says so again
-        // for a socket systemd made, whose directory this code did not check.
+    // admitted is the services socket's map of uid to service; null on the
+    // user's own socket.
+    async _serve(connection, admitted = null) {
+        // On the user's socket, the directory already keeps everyone else
+        // out; this says so again for a socket systemd made, whose directory
+        // this code did not check.
         const peer = connection.get_socket().get_credentials();
-        if (peer.get_unix_user() !== this.uid) {
+        const uid = peer.get_unix_user();
+        const service = admitted ? admitted.get(uid) : null;
+        if (admitted ? !service : uid !== this.uid) {
             connection.close(null);
             return;
         }
@@ -152,6 +189,8 @@ export class Server {
             }
 
             const item = validate(hello.item, version);
+            if (service)
+                fromService(item, service, uid, peer.get_unix_pid());
             const client = {
                 // The last line: the answer, and the conversation is over.
                 answer: answer => {

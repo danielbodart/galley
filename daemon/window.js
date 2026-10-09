@@ -46,7 +46,7 @@ import Gdk from 'gi://Gdk?version=4.0';
 import Gtk from 'gi://Gtk?version=4.0';
 import Adw from 'gi://Adw?version=1';
 
-import {Queue, waited, sameness} from './queue.js';
+import {Queue, waited, sameness, streams} from './queue.js';
 import {render, lines, buttonMarkup} from './render.js';
 import {makeBody, chooseFiles} from './bodies.js';
 import {tint, symbolicName, css} from './icons.js';
@@ -98,6 +98,9 @@ export class QueueWindow {
         this._live = new Map();
         // The tray icon, when the session has a bus for one (main.js).
         this.tray = null;
+        // Each service's group, by uid: its rows are grouped under its label,
+        // and never with a client's that has that label for a title.
+        this._serviceGroups = new Map();
         // Opens GTK's file chooser for a file-selection item; the test
         // control stands in for it.
         this.chooseFiles = chooseFiles;
@@ -135,7 +138,7 @@ export class QueueWindow {
                 return;
             }
             row.set_header(new Gtk.Label({
-                label: row._record.group || 'Untitled',
+                label: row._record.heading || 'Untitled',
                 xalign: 0,
                 ellipsize: 3,
                 css_classes: ['heading'],
@@ -232,7 +235,7 @@ export class QueueWindow {
     // after it is queued: one that is shared stays the question each of its
     // askers asked, whatever one of them sends.
     _handle(record, attachment) {
-        const follow = record.key === null ? record.body.follow ?? {} : {};
+        const follow = streams(record.item) ? record.body.follow ?? {} : {};
         return {
             append: text => !record.done && follow.append?.(text),
             rows: rows => !record.done && follow.rows?.(rows),
@@ -321,7 +324,8 @@ export class QueueWindow {
         const record = {
             id: `item-${this._next++}`,
             item,
-            group: item.title,
+            group: item.caller ? this._serviceGroup(item.caller) : item.title,
+            heading: item.caller ? item.caller.label : item.title,
             arrived: GLib.get_monotonic_time(),
             askers: client ? [{client}] : [],
             done: false,
@@ -367,6 +371,15 @@ export class QueueWindow {
         this._title();
         this._notify(record);
         return record;
+    }
+
+    _serviceGroup(caller) {
+        let group = this._serviceGroups.get(caller.uid);
+        if (!group) {
+            group = {uid: caller.uid};
+            this._serviceGroups.set(caller.uid, group);
+        }
+        return group;
     }
 
     _row(record) {
@@ -423,6 +436,11 @@ export class QueueWindow {
             spacing: 12,
             margin_top: 18, margin_bottom: 18, margin_start: 18, margin_end: 18,
         });
+
+        if (item.caller && item.level === 'danger') {
+            record.banner = new Adw.Banner({title: 'Danger', revealed: true});
+            page.append(record.banner);
+        }
 
         const head = new Gtk.Box({spacing: 12});
         record.icon = icon(item.icon, item.kind);
@@ -808,7 +826,10 @@ export class QueueWindow {
                 id: r.id,
                 kind: r.item.kind,
                 title: r.item.title,
-                group: r.group,
+                group: r.heading,
+                caller: r.item.caller ?? null,
+                level: r.item.level,
+                banner: r.banner?.revealed ? r.banner.title : '',
                 text: render(r.item.text ?? '', r.item.markup).text,
                 info: r.item.kind === 'text' ? r.body.state().text : undefined,
                 icon: r.item.icon,

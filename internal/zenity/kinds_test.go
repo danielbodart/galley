@@ -224,6 +224,29 @@ func TestAForm(t *testing.T) {
 	}
 }
 
+// --value straight after an --add-entry or --add-multiline-entry is that
+// field's starting text; anywhere else it is the scale's integer.
+func TestValueFillsThePrecedingEntry(t *testing.T) {
+	f := parsed(t, "--forms", "--add-entry=Name", "--value=Dan", "--add-password=PIN",
+		"--add-multiline-entry=Notes", "--value", "a\nb", "--add-entry=Bare", "--add-entry=For", "--forms-value=15").Item.Forms.Fields
+	if got := []string{f[0].Text, f[1].Text, f[2].Text, f[3].Text, f[4].Text}; !reflect.DeepEqual(got, []string{"Dan", "", "a\nb", "", "15"}) {
+		t.Errorf("texts = %q", got)
+	}
+	if s := parsed(t, "--scale", "--value=5").Item.Scale; s.Value != 5 {
+		t.Errorf("--scale --value=5 is %d", s.Value)
+	}
+	for _, args := range [][]string{
+		{"--forms", "--add-password=PIN", "--value=x"},
+		{"--forms", "--add-entry=Name", "--title=t", "--value=x"},
+		{"--forms", "--add-combo=Size", "--value=x"},
+		{"--forms", "--forms-value=x"},
+	} {
+		if _, err := Parse(args, "/"); err == nil || err.Error() != errSyntax {
+			t.Errorf("%q: %v", args, err)
+		}
+	}
+}
+
 func TestAFormsOutput(t *testing.T) {
 	s := func(v string) *string { return &v }
 	forms := &wire.Forms{Fields: []wire.Field{

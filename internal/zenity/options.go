@@ -12,11 +12,12 @@ import (
 type arg int
 
 const (
-	none    arg = iota
-	str         // G_OPTION_ARG_STRING and _FILENAME
-	integer     // G_OPTION_ARG_INT
-	strs        // G_OPTION_ARG_STRING_ARRAY: each one given, in order
-	field       // a --forms field, G_OPTION_ARG_CALLBACK
+	none      arg = iota
+	str           // G_OPTION_ARG_STRING and _FILENAME
+	integer       // G_OPTION_ARG_INT
+	strs          // G_OPTION_ARG_STRING_ARRAY: each one given, in order
+	field         // a --forms field, G_OPTION_ARG_CALLBACK
+	fieldText     // galley's --value for the --forms field before it
 )
 
 // entry is one GOptionEntry. key is what it sets, shared where zenity's
@@ -159,6 +160,9 @@ var groups = []group{
 		{"list-values", strs, false, "list-values"},
 		{"column-values", strs, false, "column-values"},
 		{"add-combo", field, false, "add-combo"},
+		// Reached as --value only straight after an --add-entry or
+		// --add-multiline-entry; anywhere else --value is the scale's.
+		{"value", fieldText, false, "field-text"},
 		{"combo-values", strs, false, "combo-values"},
 		{"show-header", none, false, "show-header"},
 		{"text", str, true, "text"},
@@ -213,6 +217,20 @@ func lookup(name string) (entry, bool) {
 	return entry{}, false
 }
 
+func lookupIn(groupName, name string) (entry, bool) {
+	for _, g := range groups {
+		if g.name != groupName {
+			continue
+		}
+		for _, e := range g.entries {
+			if e.name == name {
+				return e, true
+			}
+		}
+	}
+	return entry{}, false
+}
+
 // read is what a command line set.
 type read struct {
 	dialogs map[string]bool
@@ -227,7 +245,7 @@ type read struct {
 	show       bool
 }
 
-type formField struct{ option, label string }
+type formField struct{ option, label, text string }
 
 // parse reads argv as GOption does. Any mistake is GOption's error, which
 // zenity's error hook turns into its one message for all of them.
@@ -235,8 +253,12 @@ func parse(argv []string) (*read, error) {
 	r := &read{dialogs: map[string]bool{}, set: map[string]bool{}, str: map[string]string{},
 		ints: map[string]int{}, lists: map[string][]string{}}
 	syntax := &Error{Message: errSyntax}
+	// The field an --add-entry or --add-multiline-entry just added, or -1.
+	entryField := -1
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
+		prev := entryField
+		entryField = -1
 		if a == "--" {
 			r.positional = append(r.positional, argv[i+1:]...)
 			break
@@ -265,6 +287,9 @@ func parse(argv []string) (*read, error) {
 		if !ok {
 			return nil, syntax
 		}
+		if e.key == "value" && prev >= 0 {
+			e, _ = lookupIn("forms", "value")
+		}
 		if e.arg == none {
 			// GOption takes --flag=anything as the flag.
 			if e.key == "dialog" {
@@ -291,7 +316,16 @@ func parse(argv []string) (*read, error) {
 		case strs:
 			r.lists[e.key] = append(r.lists[e.key], value)
 		case field:
-			r.fields = append(r.fields, formField{e.name, value})
+			r.fields = append(r.fields, formField{option: e.name, label: value})
+			if e.name == "add-entry" || e.name == "add-multiline-entry" {
+				entryField = len(r.fields) - 1
+			}
+		case fieldText:
+			if prev < 0 {
+				return nil, syntax
+			}
+			r.fields[prev].text = value
+			continue
 		default:
 			r.str[e.key] = value
 		}

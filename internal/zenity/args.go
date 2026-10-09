@@ -335,7 +335,7 @@ func parseAt(argv []string, cwd string, now time.Time) (*Invocation, error) {
 		}
 		lists, combos := 0, 0
 		for _, f := range r.fields {
-			fd := wire.Field{Label: f.label}
+			fd := wire.Field{Label: f.label, Text: f.text}
 			switch f.option {
 			case "add-entry":
 				fd.Kind = wire.FieldEntry

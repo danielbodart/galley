@@ -252,7 +252,7 @@ with zenity's own over thousands of command lines.
 | | |
 |---|---|
 | **Dialogs** | `--question` (with `--switch`), `--info`, `--warning`, `--error`, `--entry` (a combo when given values after its options), `--password`, `--text-info` (with `--editable`), `--list` (`--checklist`, `--radiolist`, `--imagelist`), `--forms`, `--calendar`, `--scale`, `--color-selection`, `--file-selection`, `--progress`, `--notification` (with `--listen`), `--about` |
-| **Options** | every one each dialog takes in zenity: `--title`, `--text`, `--ok-label`, `--cancel-label`, `--extra-button`, `--timeout`, `--width`, `--height`, `--icon` (and its deprecated `--window-icon` and `--icon-name`, with zenity's warnings), `--no-markup`, `--no-wrap`, `--ellipsize`, `--default-cancel`, `--entry-text`, `--hide-text`, `--filename` (else stdin, read as it arrives), `--checkbox`, `--auto-scroll`, `--username`; a list's `--column`, `--separator`, `--multiple`, `--editable`, `--print-column`, `--hide-column`, `--hide-header` and rows after the options or on stdin; a form's `--add-entry`, `--add-password`, `--add-multiline-entry`, `--add-calendar`, `--add-list`, `--list-values`, `--column-values`, `--show-header`, `--add-combo`, `--combo-values`, `--forms-date-format`; `--day`, `--month`, `--year`, `--date-format`; `--value`, `--min-value`, `--max-value`, `--step`, `--print-partial`, `--hide-value`; `--color`, `--show-palette`; `--save`, `--directory`, `--file-filter`; `--percentage`, `--pulsate`, `--auto-close`, `--auto-kill`, `--no-cancel`, `--time-remaining` |
+| **Options** | every one each dialog takes in zenity: `--title`, `--text`, `--ok-label`, `--cancel-label`, `--extra-button`, `--timeout`, `--width`, `--height`, `--icon` (and its deprecated `--window-icon` and `--icon-name`, with zenity's warnings), `--no-markup`, `--no-wrap`, `--ellipsize`, `--default-cancel`, `--entry-text`, `--hide-text`, `--filename` (else stdin, read as it arrives), `--checkbox`, `--auto-scroll`, `--username`; a list's `--column`, `--separator`, `--multiple`, `--editable`, `--print-column`, `--hide-column`, `--hide-header` and rows after the options or on stdin; a form's `--add-entry`, `--add-password`, `--add-multiline-entry`, `--add-calendar`, `--add-list`, `--list-values`, `--column-values`, `--show-header`, `--add-combo`, `--combo-values`, `--forms-date-format`, and galley's `--value TEXT` straight after an `--add-entry` or `--add-multiline-entry`, its starting text; `--day`, `--month`, `--year`, `--date-format`; `--value`, `--min-value`, `--max-value`, `--step`, `--print-partial`, `--hide-value`; `--color`, `--show-palette`; `--save`, `--directory`, `--file-filter`; `--percentage`, `--pulsate`, `--auto-close`, `--auto-kill`, `--no-cancel`, `--time-remaining` |
 | **Output** | zenity's, dialog by dialog: a list's printed columns joined by the separator (its escapes undone), nothing when nothing is chosen; a form's fields joined by its separator, a list's cells each with a comma unless it is last; a date by `--date-format` (GLib's), else the locale's `%x`, in the caller's `LC_TIME`; a scale's value, and each as it moves with `--print-partial`; `user\|password`; `rgb(…)` or `rgba(…)`; the chosen paths joined by the separator; an editable text as it ends, with no newline added. On a timeout, what zenity prints then: an entry's, a list's, a form's, a calendar's, a scale's and an editable text's values; nothing for the rest |
 | **Exits** | 0 OK, 1 Cancel, 1 and the label on stdout for an extra button, 5 timed out, 255 a command-line error; `ZENITY_OK` / `DIALOG_OK` and the rest override each, as in zenity. What zenity refuses once its dialog has started is said as it says it and exits as it does: 0 for a list with no `--column`, a check or radio list with fewer than two, two list types, or a scale out of its range (zenity sets an error code and never reads it); 255 for `--auto-close --percentage=100`; 1 for a `--notification` with no text |
 | **Text** | As zenity 4.2 treats it: a message's `--text` has GLib's escapes undone (`\n`, `\t`, octal) and is markup, unless `--no-markup`, when it is taken as it is; a list's, a form's, a calendar's, a scale's and a progress bar's `--text` and `#` lines likewise, always as markup; an entry's `--text` has its escapes undone and is a mnemonic label (`__` is `_`); a notification's has its escapes undone and is plain, its first line the title; cells, labels and paths are plain |
@@ -355,6 +355,14 @@ started before the rest.
   connect, as it could run zenity. And GTK's accessibility bus, where it is
   on, lets such a process press buttons in any window; galley's is off it
   unless asked for, the rest of the desktop's is the desktop's boundary.
+- **Services post on their own socket.** With `services.galley.services`
+  set, the window also binds `/run/galley-ask/<user>.sock`, open to every
+  user, and serves only the uids of the users named there, resolved from
+  `/etc/passwd` at start; anyone else is hung up on. A service's item is
+  shown under its label, never as markup, with galley's icon for its
+  `level` -- normal, warning or danger, which also has a banner -- and is
+  never shared with another row. An item a client sends with a `caller` is
+  refused.
 - **The test control is not shipped.** The end-to-end check presses keys
   through `daemon/test-control.js`; the package leaves that file out.
 
@@ -365,9 +373,12 @@ started before the rest.
 | `services.galley.enable` | `false` | The socket, and the window it starts. |
 | `services.galley.package` | this flake's `galley` | The client and the window. |
 | `services.galley.accessibility` | `false` | Leave GTK's accessibility bus on for the window, as a screen reader needs. |
+| `services.galley.services` | `{ }` | System users whose services may post, by name, to the label shown for each, e.g. `{ ssh-signer = "SSH signer"; }`. Non-empty, the window binds `/run/galley-ask/<user>.sock`; the system makes that directory, 0755 and owned by the user. |
 
 Package: `galley` (`bin/galley`, `bin/galley-daemon`). `$GALLEY_SOCKET`
-overrides the socket's path for the client and the window, for tests. It does not make a second window: the window is
+overrides the socket's path for the client and the window, for tests.
+`$GALLEY_SERVICES_SOCKET` is the services' socket, and `$GALLEY_SERVICES`
+a JSON object of user name to label. It does not make a second window: the window is
 one application on the session bus, and a second `galley-daemon` in the
 same session says so and exits 1 rather than leave its socket unserved.
 

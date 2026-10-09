@@ -5,6 +5,9 @@
 //
 //   galley-daemon
 //
+// $GALLEY_SERVICES_SOCKET and $GALLEY_SERVICES add the services' socket
+// (server.js, services.js).
+//
 // $GALLEY_SOCKET overrides where it listens, for tests. It does not make a
 // second window: the window is one application on the session bus, and
 // there is one of it there (see below).
@@ -16,6 +19,7 @@ import System from 'system';
 
 import {QueueWindow} from './window.js';
 import {Server} from './server.js';
+import {admitted} from './services.js';
 import {Tray} from './tray.js';
 
 const APP_ID = 'io.github.danielbodart.Galley';
@@ -28,6 +32,7 @@ GLib.set_application_name('galley');
 
 const socketPath = GLib.getenv('GALLEY_SOCKET') ||
     GLib.build_filenamev([GLib.get_user_runtime_dir(), 'galley', 'sock']);
+const servicesPath = GLib.getenv('GALLEY_SERVICES_SOCKET');
 
 // HANDLES_COMMAND_LINE, so that starting does not emit activate and show the
 // window: a socket-activated window is started by an item arriving, and
@@ -67,10 +72,16 @@ app.connect('startup', () => {
         window.tray = new Tray(bus, token => window.show(token), () => app.quit());
 
     server = new Server(window);
+    let path = socketPath;
     try {
         server.listen(socketPath);
+        if (servicesPath) {
+            path = servicesPath;
+            const passwd = new TextDecoder().decode(GLib.file_get_contents('/etc/passwd')[1]);
+            server.listenServices(servicesPath, admitted(GLib.getenv('GALLEY_SERVICES'), passwd));
+        }
     } catch (e) {
-        printerr(`galley: cannot listen on ${socketPath}: ${e.message}`);
+        printerr(`galley: cannot listen on ${path}: ${e.message}`);
         status = 1;
         app.release();
         app.quit();

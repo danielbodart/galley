@@ -492,7 +492,7 @@ function formsBody(item) {
         case 'password': {
             const entry = f.kind === 'password'
                 ? new Gtk.PasswordEntry({show_peek_icon: true, hexpand: true})
-                : new Gtk.Entry({hexpand: true});
+                : new Gtk.Entry({hexpand: true, text: f.text});
             widget = focus = entry;
             value = () => ({text: entry.get_text()});
             clear = () => entry.set_text('');
@@ -503,6 +503,7 @@ function formsBody(item) {
         case 'multiline': {
             const view = new Gtk.TextView({wrap_mode: Gtk.WrapMode.WORD, accepts_tab: false,
                 top_margin: 6, bottom_margin: 6, left_margin: 6, right_margin: 6});
+            view.buffer.set_text(f.text, -1);
             widget = new Gtk.ScrolledWindow({child: view, vexpand: true, hexpand: true,
                 min_content_height: 80, css_classes: ['card']});
             expands = true;

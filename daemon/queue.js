@@ -91,5 +91,6 @@ export function streams(item) {
 }
 
 // What makes two items the same question: the whole item, as validate()
-// made it. null for one that streams, which is never shared.
-export const sameness = item => (streams(item) ? null : JSON.stringify(item));
+// made it. null for one that streams, or a service's, which are never
+// shared.
+export const sameness = item => (streams(item) || item.caller ? null : JSON.stringify(item));

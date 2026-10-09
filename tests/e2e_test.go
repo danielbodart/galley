@@ -20,6 +20,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -31,6 +32,9 @@ var (
 	runtimeDir string
 	client     string
 	ready      bool
+	// How the window was started, for a test that starts another.
+	daemonArgs []string
+	daemonEnv  []string
 )
 
 func TestMain(m *testing.M) {
@@ -75,9 +79,15 @@ func setUp(daemon, broadwayd string, m *testing.M) (int, error) {
 	defer bw.Process.Kill()
 	time.Sleep(500 * time.Millisecond)
 
-	words := strings.Fields(daemon)
-	d := exec.Command(words[0], words[1:]...)
-	d.Env = append(env, "GALLEY_TEST_CONTROL="+filepath.Join(dir, "ctl"))
+	me, err := user.Current()
+	if err != nil {
+		return 0, err
+	}
+	daemonArgs, daemonEnv = strings.Fields(daemon), env
+	d := exec.Command(daemonArgs[0], daemonArgs[1:]...)
+	d.Env = append(env, "GALLEY_TEST_CONTROL="+filepath.Join(dir, "ctl"),
+		"GALLEY_SERVICES_SOCKET="+filepath.Join(dir, "services"),
+		fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
 	d.Stdout, d.Stderr = os.Stderr, os.Stderr
 	if err := d.Start(); err != nil {
 		return 0, err
@@ -86,7 +96,8 @@ func setUp(daemon, broadwayd string, m *testing.M) (int, error) {
 	for i := 0; ; i++ {
 		_, a := os.Stat(filepath.Join(dir, "galley", "sock"))
 		_, b := os.Stat(filepath.Join(dir, "ctl"))
-		if a == nil && b == nil {
+		_, c := os.Stat(filepath.Join(dir, "services"))
+		if a == nil && b == nil && c == nil {
 			break
 		}
 		if i > 300 {
@@ -129,10 +140,18 @@ type state struct {
 	Withdrawn bool    `json:"withdrawn"`
 	Focus     string  `json:"focus"`
 	Items     []struct {
-		ID      string `json:"id"`
-		Kind    string `json:"kind"`
-		Title   string `json:"title"`
-		Group   string `json:"group"`
+		ID     string `json:"id"`
+		Kind   string `json:"kind"`
+		Title  string `json:"title"`
+		Group  string `json:"group"`
+		Caller *struct {
+			UID   int    `json:"uid"`
+			Name  string `json:"name"`
+			Label string `json:"label"`
+			PID   int    `json:"pid"`
+		} `json:"caller"`
+		Level   string `json:"level"`
+		Banner  string `json:"banner"`
 		Text    string `json:"text"`
 		Info    string `json:"info"`
 		Icon    string `json:"icon"`

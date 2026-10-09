@@ -33,6 +33,8 @@ const named = {
     'security-medium': 'blue',
     // A recording's question: frisket's asker under `chase record`.
     'media-tape': 'red',
+    // A service's danger level.
+    'security-low': 'red',
     // An entry whose text is shown.
     'text-editor': 'green',
     // Any other question, and zenity's messages.
@@ -51,6 +53,9 @@ const named = {
     'appointment-soon': 'slate',
     'help-about': 'slate',
 };
+
+// A service's icon, by its item's level: galley's, never the service's own.
+export const levelIcon = {normal: 'security-medium', warning: 'dialog-warning', danger: 'security-low'};
 
 const order = Object.keys(shades);
 

@@ -12,7 +12,8 @@ import {Queue, waited, sameness} from '../daemon/queue.js';
 import {render, lines, buttonMarkup} from '../daemon/render.js';
 import {validate, rows, progressUpdate, notify} from '../daemon/validate.js';
 import {formatDate} from '../daemon/dates.js';
-import {tint, symbolicName, css} from '../daemon/icons.js';
+import {tint, symbolicName, css, levelIcon} from '../daemon/icons.js';
+import {admitted, fromService} from '../daemon/services.js';
 import {isDiff, diffSpans, MAX_DIFF} from '../daemon/diff.js';
 import {label} from '../daemon/tray.js';
 
@@ -252,6 +253,30 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     shared('a password', {kind: 'password', buttons: []});
     shared('a hidden entry', {kind: 'entry', buttons: [], entry: {hidden: true}});
     shared('a question', ask);
+}
+
+// ---- services ----------------------------------------------------------------
+
+{
+    const passwd = 'root:x:0:0::/root:/bin/sh\nssh-signer:x:951:951::/:/sbin/nologin\n' +
+        'sudo-gate:x:952:952::/:/sbin/nologin\nbroken:x:abc:1::/:/\n';
+    const map = admitted('{"ssh-signer":"SSH signer","sudo-gate":"sudo","ghost":"Ghost","broken":"B"}', passwd);
+    check('admitted', [...map.entries()], [[951, {name: 'ssh-signer', label: 'SSH signer'}],
+        [952, {name: 'sudo-gate', label: 'sudo'}]]);
+    check('none set', admitted(undefined, passwd).size, 0);
+    throws('not an object', () => admitted('["ssh-signer"]', passwd), /object/);
+    throws('a label not a string', () => admitted('{"ssh-signer":1}', passwd), /label/);
+
+    const ask = {kind: 'question', title: 'ssh to server', text: '<b>x</b>', markup: true, icon: 'media-tape',
+        buttons: [{answer: 'cancel', label: 'Refuse'}]};
+    const signer = {name: 'ssh-signer', label: 'SSH signer'};
+    const item = level => fromService(validate({...ask, level}, 3), signer, 951, 42);
+    check('the caller', item('normal').caller, {uid: 951, name: 'ssh-signer', label: 'SSH signer', pid: 42});
+    check('no markup', item('normal').markup, false);
+    check('icons by level', ['normal', 'warning', 'danger'].map(l => item(l).icon),
+        ['security-medium', 'dialog-warning', 'security-low']);
+    check('each level its own colour', new Set(Object.values(levelIcon).map(tint)).size, 3);
+    check('a service\'s item is never the same as another', sameness(item('normal')), null);
 }
 
 // ---- dates -------------------------------------------------------------------

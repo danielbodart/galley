@@ -183,6 +183,24 @@ func TestAForm(t *testing.T) {
 	r.expect(t, 0, " ||\n")
 }
 
+// --value gives the entry before it its starting text; --scale's is still
+// its number.
+func TestValueFillsTheEntryBeforeIt(t *testing.T) {
+	need(t)
+	r := start(t, "", "--forms", "--add-entry=For", "--value=15", "--add-multiline-entry=Notes", "--value=a\nb")
+	s := waitFor(t, "the form", items(1))
+	if got := string(s.Items[0].Body); got != `{"fields":[{"text":"15"},{"text":"a\nb"}]}` {
+		t.Errorf("body = %s", got)
+	}
+	press(t, "Return")
+	r.expect(t, 0, "15|a\nb\n")
+
+	r = start(t, "", "--scale", "--value", "5")
+	waitFor(t, "the scale", items(1))
+	press(t, "Return")
+	r.expect(t, 0, "5\n")
+}
+
 func TestACalendar(t *testing.T) {
 	need(t)
 	r := start(t, "", "--calendar", "--day=5", "--month=3", "--year=2024", "--date-format=%d.%m.%Y (%A)")

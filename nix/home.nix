@@ -8,6 +8,14 @@ self:
 
 let
   cfg = config.services.galley;
+  # One Environment= assignment, quoted for systemd: % is a specifier,
+  # and inside double quotes \ and " are escaped.
+  assignment = s: "\"" + lib.escape [ "\\" "\"" ] (lib.replaceStrings [ "%" ] [ "%%" ] s) + "\"";
+  environment = lib.optional (!cfg.accessibility) "GTK_A11Y=none"
+    ++ lib.optionals (cfg.services != { }) [
+    "GALLEY_SERVICES_SOCKET=/run/galley-ask/%u.sock"
+    (assignment "GALLEY_SERVICES=${builtins.toJSON cfg.services}")
+  ];
 in
 {
   options.services.galley = {
@@ -28,6 +36,18 @@ in
         as a screen reader needs. Off, the window starts with GTK_A11Y=none:
         that bus is open to any process in the session, and through it
         such a process could press Allow on a question it asked itself.
+      '';
+    };
+
+    services = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      example = { ssh-signer = "SSH signer"; sudo-gate = "sudo"; };
+      description = ''
+        System users whose services may post to the window, by user name,
+        each with the label the window shows for it. When any is set, the
+        window binds /run/galley-ask/<user>.sock for them, a directory the
+        system must make (0755, owned by this user).
       '';
     };
   };
@@ -58,8 +78,8 @@ in
       # desktop's dark style, accent colour and contrast.
       Service = {
         ExecStart = "${cfg.package}/bin/galley-daemon";
-      } // lib.optionalAttrs (!cfg.accessibility) {
-        Environment = [ "GTK_A11Y=none" ];
+      } // lib.optionalAttrs (environment != [ ]) {
+        Environment = environment;
       };
     };
   };
