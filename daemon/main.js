@@ -67,10 +67,10 @@ app.connect('startup', () => {
     app.add_action(show);
 
     // The tray icon, whose menu brings the window forward, as the action
-    // does, or quits it.
+    // does.
     const bus = app.get_dbus_connection();
     if (bus)
-        window.tray = new Tray(bus, token => window.show(token), () => app.quit());
+        window.tray = new Tray(bus, token => window.show(token));
 
     server = new Server(window);
     try {

@@ -157,9 +157,9 @@ one GNOME may say the window is ready rather than raise it.
 
 From its start, which is the first question's arrival, the window has an icon
 in the tray with how many questions are waiting beside it. Its menu has *Open
-galley* and *Quit*, and a double click opens it too, the tray handing on a
-token so that it takes focus. Quitting hangs up on every client still
-waiting, as killing the window does; the next question starts it again. The
+galley*, and a double click opens it too, the tray handing on a token so
+that it takes focus. There is no Quit, since services that ask through
+galley expect it to be there. The
 icon is a StatusNotifierItem: GNOME shows it with the AppIndicator extension,
 and without one there is simply no icon.
 
@@ -326,7 +326,7 @@ started before the rest.
   GApplication's actions are exported on the session bus, so buttons answer
   through their own signal handlers and no action answers anything. The one
   action is `show`, and the tray icon's menu, also on the bus, only shows
-  the window or quits it. GTK's accessibility bus could press a button too, so
+  the window. GTK's accessibility bus could press a button too, so
   the units start the window with it off (`GTK_A11Y=none`) unless
   `services.galley.accessibility` is set; a window started by hand has it
   on.

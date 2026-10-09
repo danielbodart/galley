@@ -1,14 +1,13 @@
 // The tray icon: galley's icon in the top bar, with how many questions are
-// waiting beside it, and a menu to bring the window forward or quit. It is a
+// waiting beside it, and a menu to bring the window forward. It is a
 // StatusNotifierItem on the session bus, which GNOME shows with the
 // AppIndicator extension and other desktops on their own; with neither,
 // nothing shows it and nothing is lost.
 //
 // It is there from the window's start, which is the first question's
 // arrival (nix/galley.socket), and goes with the window. Nothing in it
-// answers a question: Open does what `galley --show` does, and Quit ends the
-// window, which every client waiting reads as a hang-up, as when it is
-// killed.
+// answers a question: Open does what `galley --show` does. There is no Quit:
+// services that ask through galley expect it to be there.
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -77,18 +76,16 @@ const DBUSMENU = `
   </interface>
 </node>`;
 
-const OPEN = 1, LINE = 2, QUIT = 3;
+const OPEN = 1;
 
-// Each entry's properties, by id: the menu itself, then Open, a line, Quit.
+// Each entry's properties, by id: the menu itself, then Open.
 const ENTRIES = {
     0: {'children-display': new GLib.Variant('s', 'submenu')},
     [OPEN]: {label: new GLib.Variant('s', 'Open galley')},
-    [LINE]: {type: new GLib.Variant('s', 'separator')},
-    [QUIT]: {label: new GLib.Variant('s', 'Quit')},
 };
 
 const LAYOUT = new GLib.Variant('(u(ia{sv}av))', [1, [0, ENTRIES[0],
-    [OPEN, LINE, QUIT].map(id => new GLib.Variant('(ia{sv}av)', [id, ENTRIES[id], []]))]]);
+    [OPEN].map(id => new GLib.Variant('(ia{sv}av)', [id, ENTRIES[id], []]))]]);
 
 // The label beside the icon: the count while something waits, else nothing.
 export const label = n => (n > 0 ? String(n) : '');
@@ -100,8 +97,8 @@ const GUIDE = '99';
 export class Tray {
     // show(token) brings the window forward, with the activation token the
     // tray gave for the click when it gave one: under Wayland only that lets
-    // the window take focus. quit() ends the window.
-    constructor(connection, show, quit) {
+    // the window take focus.
+    constructor(connection, show) {
         this._waiting = 0;
         this._token = null;
         const open = () => {
@@ -114,8 +111,6 @@ export class Tray {
                 return;
             if (id === OPEN)
                 open();
-            else if (id === QUIT)
-                quit();
         };
 
         const tray = this;
