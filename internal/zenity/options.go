@@ -255,6 +255,9 @@ func parse(argv []string) (*read, error) {
 	syntax := &Error{Message: errSyntax}
 	// The field an --add-entry or --add-multiline-entry just added, or -1.
 	entryField := -1
+	// A bare --value given to a field, which is the scale's after all
+	// unless the dialog is --forms.
+	var fieldValue *string
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
 		prev := entryField
@@ -287,7 +290,7 @@ func parse(argv []string) (*read, error) {
 		if !ok {
 			return nil, syntax
 		}
-		if e.key == "value" && prev >= 0 {
+		if name == "value" && prev >= 0 {
 			e, _ = lookupIn("forms", "value")
 		}
 		if e.arg == none {
@@ -308,6 +311,9 @@ func parse(argv []string) (*read, error) {
 		}
 		switch e.arg {
 		case integer:
+			if e.key == "value" {
+				fieldValue = nil
+			}
 			n, ok := strtol(value)
 			if !ok {
 				return nil, syntax
@@ -325,11 +331,22 @@ func parse(argv []string) (*read, error) {
 				return nil, syntax
 			}
 			r.fields[prev].text = value
+			if name == "value" {
+				fieldValue = &value
+			}
 			continue
 		default:
 			r.str[e.key] = value
 		}
 		r.set[e.key] = true
+	}
+	if fieldValue != nil && !r.dialogs["forms"] {
+		n, ok := strtol(*fieldValue)
+		if !ok {
+			return nil, syntax
+		}
+		r.ints["value"] = n
+		r.set["value"] = true
 	}
 	return r, nil
 }

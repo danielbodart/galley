@@ -181,7 +181,7 @@ export class Server {
             if (!Number.isInteger(version) || version < MIN_VERSION || version > VERSION)
                 throw new Error(`protocol version ${version} is not one from ${MIN_VERSION} to ${VERSION}`);
 
-            if (hello.show === true) {
+            if (!service && hello.show === true) {
                 this.window.show(typeof hello.token === 'string' ? hello.token : null);
                 send({shown: true});
                 hangUp();

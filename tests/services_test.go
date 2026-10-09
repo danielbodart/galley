@@ -125,6 +125,64 @@ func TestServiceRowsNeverJoin(t *testing.T) {
 	}
 }
 
+// A client whose title is a service's label is not in that service's group.
+func TestAClientTitledAsAServiceIsNotInItsGroup(t *testing.T) {
+	need(t)
+	sock := filepath.Join(runtimeDir, "galley", "sock")
+	question := func(title string) string {
+		return fmt.Sprintf(`{"galley":3,"item":{"kind":"question","title":%q,"buttons":[{"answer":"cancel","label":"Refuse","key":"r"}],"default":-1}}`, title)
+	}
+	posted := []*service{postService(t, serviceQuestion("normal", "service"))}
+	waitFor(t, "the service", items(1))
+	posted = append(posted, post(t, sock, question("Other")))
+	waitFor(t, "the other", items(2))
+	posted = append(posted, post(t, sock, question("Me")))
+	s := waitFor(t, "the one titled Me", items(3))
+	if s.Items[0].Caller == nil || s.Items[1].Title != "Other" || s.Items[2].Title != "Me" {
+		t.Errorf("order: %+v", s.Items)
+	}
+	for range posted {
+		press(t, "r")
+	}
+	for _, p := range posted {
+		p.answer(t, `{"answer":"cancel"}`)
+	}
+}
+
+// A service's follow lines keep its markup off and its icon galley's.
+func TestAServiceFollowLineHasNoMarkupNorItsOwnIcon(t *testing.T) {
+	need(t)
+	p := postService(t, `{"galley":3,"item":{"kind":"progress","level":"warning","title":"t","text":"x","buttons":[],"progress":{}}}`)
+	waitFor(t, "the progress", items(1))
+	fmt.Fprintln(p.conn, `{"progress":{"text":"<b>bold</b>"}}`)
+	s := waitFor(t, "the progress text", func(s state) bool { return len(s.Items) == 1 && s.Items[0].Text != "x" })
+	if it := s.Items[0]; it.Text != "<b>bold</b>" || it.Icon != "dialog-warning" {
+		t.Errorf("progress: %+v", it)
+	}
+	p.conn.Close()
+	waitFor(t, "the progress to go", items(0))
+
+	n := postService(t, `{"galley":3,"item":{"kind":"notification","level":"danger","title":"t","buttons":[{"answer":"ok","label":"OK"}],"default":0,"note":{"listen":true}}}`)
+	for i, text := range []string{"<b>first</b>", "<b>second</b>"} {
+		fmt.Fprintf(n.conn, `{"notify":{"text":%q,"icon":"emblem-ok"}}`+"\n", text)
+		s := waitFor(t, text, func(s state) bool { return len(s.Items) == 1 && s.Items[0].Text == text })
+		if it := s.Items[0]; it.Icon != "security-low" || it.Banner != "Danger" {
+			t.Errorf("notification %d: %+v", i, it)
+		}
+	}
+	n.conn.Close()
+	press(t, "Return")
+}
+
+// The services socket only posts items.
+func TestAServiceCannotShowTheWindow(t *testing.T) {
+	need(t)
+	p := postService(t, `{"galley":3,"show":true}`)
+	if line, _ := p.r.ReadString('\n'); !strings.Contains(line, "error") {
+		t.Errorf("reply = %q", line)
+	}
+}
+
 // The sudo dialog shows its prefilled time, and Enter after the password
 // presses Allow.
 func TestEnterInTheSudoFormPressesAllow(t *testing.T) {

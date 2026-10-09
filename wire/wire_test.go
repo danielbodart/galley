@@ -113,6 +113,9 @@ func TestGoldens(t *testing.T) {
 			}
 
 			if hello, ok := want.(*Hello); ok {
+				if !bytes.Equal(append(written, '\n'), data) {
+					t.Errorf("written as\n%s", written)
+				}
 				if n := Needs(hello.Item); n != 3 {
 					t.Errorf("needs %d, want 3", n)
 				}

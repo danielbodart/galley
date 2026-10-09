@@ -225,7 +225,8 @@ func TestAForm(t *testing.T) {
 }
 
 // --value straight after an --add-entry or --add-multiline-entry is that
-// field's starting text; anywhere else it is the scale's integer.
+// field's starting text under --forms; anywhere else it is the scale's
+// integer.
 func TestValueFillsThePrecedingEntry(t *testing.T) {
 	f := parsed(t, "--forms", "--add-entry=Name", "--value=Dan", "--add-password=PIN",
 		"--add-multiline-entry=Notes", "--value", "a\nb", "--add-entry=Bare", "--add-entry=For", "--forms-value=15").Item.Forms.Fields
@@ -235,11 +236,17 @@ func TestValueFillsThePrecedingEntry(t *testing.T) {
 	if s := parsed(t, "--scale", "--value=5").Item.Scale; s.Value != 5 {
 		t.Errorf("--scale --value=5 is %d", s.Value)
 	}
+	if s := parsed(t, "--add-entry=x", "--value=50", "--scale").Item.Scale; s.Value != 50 {
+		t.Errorf("--value=50 after an entry under --scale is %d", s.Value)
+	}
 	for _, args := range [][]string{
 		{"--forms", "--add-password=PIN", "--value=x"},
 		{"--forms", "--add-entry=Name", "--title=t", "--value=x"},
 		{"--forms", "--add-combo=Size", "--value=x"},
 		{"--forms", "--forms-value=x"},
+		{"--scale", "--add-entry=x", "--value=abc"},
+		{"--scale", "--add-entry=x", "--scale-value=abc"},
+		{"--forms", "--add-entry=x", "--scale-value=abc"},
 	} {
 		if _, err := Parse(args, "/"); err == nil || err.Error() != errSyntax {
 			t.Errorf("%q: %v", args, err)

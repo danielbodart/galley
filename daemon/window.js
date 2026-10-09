@@ -304,7 +304,7 @@ export class QueueWindow {
         let current = null;
         return {
             notify: message => {
-                const icon = message.icon || 'dialog-information';
+                const icon = item.caller ? item.icon : message.icon || 'dialog-information';
                 if (current && !current.done) {
                     current.item.text = message.text;
                     current.item.icon = icon;
@@ -502,8 +502,8 @@ export class QueueWindow {
     // notification's messages.
     _setText(record, text, markup) {
         record.item.text = text;
-        record.item.markup = markup;
-        const rendered = render(text, markup);
+        record.item.markup = markup && !record.item.caller;
+        const rendered = render(text, record.item.markup);
         record.label.set_text(rendered.text);
         record.label.set_attributes(rendered.attributes);
         record.textScroller.visible = rendered.text !== '';
