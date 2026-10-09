@@ -171,7 +171,7 @@ func TestAServiceFollowLineHasNoMarkupNorItsOwnIcon(t *testing.T) {
 		}
 	}
 	n.conn.Close()
-	press(t, "Return")
+	waitFor(t, "the notification to go", items(0))
 }
 
 // The services socket only posts items.
@@ -219,20 +219,24 @@ func TestAServiceRowStaysUntilWithdrawn(t *testing.T) {
 	waitFor(t, "the row to go", items(0))
 }
 
-// A window whose services are someone else: a stale file where its socket
-// goes is replaced, the socket is open to all, and this user is hung up on.
-func TestAnUnlistedUidIsResetAndAStaleSocketIsReplaced(t *testing.T) {
-	need(t)
-	dir := filepath.Join(runtimeDir, "w2")
-	os.Mkdir(dir, 0o700)
-	socket := filepath.Join(dir, "services")
-	if err := os.WriteFile(socket, []byte("stale"), 0o600); err != nil {
+// second starts another window, its own socket in a directory of its own,
+// with services as its services socket, or with none when it is nil.
+func second(t *testing.T, services *os.File, env ...string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp(runtimeDir, "w")
+	if err != nil {
 		t.Fatal(err)
 	}
-	d := exec.Command(daemonArgs[0], daemonArgs[1:]...)
-	d.Env = append(daemonEnv, "GALLEY_SOCKET="+filepath.Join(dir, "sock"),
-		"GALLEY_SERVICES_SOCKET="+socket, `GALLEY_SERVICES={"root":"Root"}`)
-	d.Stdout, d.Stderr = os.Stderr, os.Stderr
+	sock := filepath.Join(dir, "sock")
+	env = append(env, "GALLEY_SOCKET="+sock)
+	var d *exec.Cmd
+	if services == nil {
+		d = exec.Command(daemonArgs[0], daemonArgs[1:]...)
+		d.Env = append(append([]string{}, daemonEnv...), env...)
+		d.Stdout, d.Stderr = os.Stderr, os.Stderr
+	} else {
+		d = withServices(services, env...)
+	}
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -241,20 +245,89 @@ func TestAnUnlistedUidIsResetAndAStaleSocketIsReplaced(t *testing.T) {
 		d.Wait()
 	})
 	for i := 0; ; i++ {
-		info, err := os.Stat(socket)
-		if err == nil && info.Mode()&os.ModeSocket != 0 {
-			if perm := info.Mode().Perm(); perm != 0o666 {
-				t.Errorf("mode %o", perm)
-			}
+		if _, err := os.Stat(sock); err == nil {
 			break
 		}
 		if i > 300 {
-			t.Fatalf("the stale file was not replaced: %v %v", info, err)
+			t.Fatal("the second window did not start listening")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	p := post(t, socket, serviceQuestion("normal", "x"))
+	return sock
+}
+
+func servicesSocket(t *testing.T) (*os.File, string) {
+	t.Helper()
+	dir, err := os.MkdirTemp(runtimeDir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "services")
+	f, err := listening(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { f.Close() })
+	return f, path
+}
+
+func hungUp(t *testing.T, p *service) {
+	t.Helper()
 	if line, err := p.r.ReadString('\n'); line != "" || (err != io.EOF && !errors.Is(err, syscall.ECONNRESET)) {
 		t.Errorf("read %q, %v", line, err)
 	}
+}
+
+// The user's socket answers --show.
+func serves(t *testing.T, sock string) {
+	t.Helper()
+	p := post(t, sock, `{"galley":3,"show":true}`)
+	p.answer(t, `{"shown":true}`)
+}
+
+// A window whose services are someone else hangs up on this user.
+func TestAnUnlistedUidIsReset(t *testing.T) {
+	need(t)
+	f, path := servicesSocket(t)
+	serves(t, second(t, f, `GALLEY_SERVICES={"root":"Root"}`))
+	hungUp(t, post(t, path, serviceQuestion("normal", "x")))
+}
+
+// Services that cannot be set up are logged, and the user is served.
+func TestBrokenServicesLeaveTheUsersSocket(t *testing.T) {
+	need(t)
+	me, _ := user.Current()
+	t.Run("a bad GALLEY_SERVICES admits no one", func(t *testing.T) {
+		f, path := servicesSocket(t)
+		serves(t, second(t, f, fmt.Sprintf(`GALLEY_SERVICES={%q:1}`, me.Username)))
+		hungUp(t, post(t, path, serviceQuestion("normal", "x")))
+	})
+	t.Run("a services fd that is not a socket", func(t *testing.T) {
+		f, err := os.Open(os.DevNull)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		serves(t, second(t, f, fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username)))
+	})
+	t.Run("GALLEY_SERVICES with no services socket", func(t *testing.T) {
+		serves(t, second(t, nil, fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username)))
+	})
+}
+
+// A service's notification goes when its connection does, plain or
+// listening.
+func TestAServiceNotificationGoesWithItsConnection(t *testing.T) {
+	need(t)
+	p := postService(t, `{"galley":3,"item":{"kind":"notification","title":"t","text":"plain","buttons":[{"answer":"ok","label":"OK"}],"default":0}}`)
+	p.answer(t, `{"queued":true}`)
+	waitFor(t, "the notification", items(1))
+	p.conn.Close()
+	waitFor(t, "the notification to go", items(0))
+
+	n := postService(t, `{"galley":3,"item":{"kind":"notification","title":"t","buttons":[{"answer":"ok","label":"OK"}],"default":0,"note":{"listen":true}}}`)
+	fmt.Fprintln(n.conn, `{"notify":{"text":"listening"}}`)
+	waitFor(t, "the listening notification", items(1))
+	n.conn.Close()
+	waitFor(t, "the listening notification to go", items(0))
 }

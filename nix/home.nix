@@ -12,10 +12,7 @@ let
   # and inside double quotes \ and " are escaped.
   assignment = s: "\"" + lib.escape [ "\\" "\"" ] (lib.replaceStrings [ "%" ] [ "%%" ] s) + "\"";
   environment = lib.optional (!cfg.accessibility) "GTK_A11Y=none"
-    ++ lib.optionals (cfg.services != { }) [
-    "GALLEY_SERVICES_SOCKET=/run/galley-ask/%u.sock"
-    (assignment "GALLEY_SERVICES=${builtins.toJSON cfg.services}")
-  ];
+    ++ lib.optional (cfg.services != { }) (assignment "GALLEY_SERVICES=${builtins.toJSON cfg.services}");
 in
 {
   options.services.galley = {
@@ -45,9 +42,10 @@ in
       example = { ssh-signer = "SSH signer"; sudo-gate = "sudo"; };
       description = ''
         System users whose services may post to the window, by user name,
-        each with the label the window shows for it. When any is set, the
-        window binds /run/galley-ask/<user>.sock for them, a directory the
-        system must make (0755, owned by this user).
+        each with the label the window shows for it. When any is set,
+        galley-services.socket listens on /run/galley-ask/<user>.sock for
+        them, in a directory the system must make (0755, owned by this
+        user).
       '';
     };
   };
@@ -62,6 +60,19 @@ in
         SocketMode = "0600";
         # The socket's privacy is its directory's: a password goes down it.
         DirectoryMode = "0700";
+        FileDescriptorName = "user";
+      };
+      Install.WantedBy = [ "sockets.target" ];
+    };
+
+    # Its own unit, since SocketMode is a unit's.
+    systemd.user.sockets.galley-services = lib.mkIf (cfg.services != { }) {
+      Unit.Description = "galley's question queue for system services (socket)";
+      Socket = {
+        ListenStream = "/run/galley-ask/%u.sock";
+        SocketMode = "0666";
+        FileDescriptorName = "services";
+        Service = "galley.service";
       };
       Install.WantedBy = [ "sockets.target" ];
     };

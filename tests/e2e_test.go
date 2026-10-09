@@ -84,20 +84,22 @@ func setUp(daemon, broadwayd string, m *testing.M) (int, error) {
 		return 0, err
 	}
 	daemonArgs, daemonEnv = strings.Fields(daemon), env
-	d := exec.Command(daemonArgs[0], daemonArgs[1:]...)
-	d.Env = append(env, "GALLEY_TEST_CONTROL="+filepath.Join(dir, "ctl"),
-		"GALLEY_SERVICES_SOCKET="+filepath.Join(dir, "services"),
+	services, err := listening(filepath.Join(dir, "services"))
+	if err != nil {
+		return 0, err
+	}
+	d := withServices(services, "GALLEY_TEST_CONTROL="+filepath.Join(dir, "ctl"),
 		fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
-	d.Stdout, d.Stderr = os.Stderr, os.Stderr
-	if err := d.Start(); err != nil {
+	err = d.Start()
+	services.Close()
+	if err != nil {
 		return 0, err
 	}
 	defer d.Process.Kill()
 	for i := 0; ; i++ {
 		_, a := os.Stat(filepath.Join(dir, "galley", "sock"))
 		_, b := os.Stat(filepath.Join(dir, "ctl"))
-		_, c := os.Stat(filepath.Join(dir, "services"))
-		if a == nil && b == nil && c == nil {
+		if a == nil && b == nil {
 			break
 		}
 		if i > 300 {
@@ -107,6 +109,27 @@ func setUp(daemon, broadwayd string, m *testing.M) (int, error) {
 	}
 	ready = true
 	return m.Run(), nil
+}
+
+// listening is a socket listening at path, as systemd makes one.
+func listening(path string) (*os.File, error) {
+	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		return nil, err
+	}
+	l.SetUnlinkOnClose(false)
+	defer l.Close()
+	return l.File()
+}
+
+// withServices is the window as systemd starts it with its services socket
+// passed: fd 3, named services, in LISTEN_FDS for its own pid.
+func withServices(services *os.File, env ...string) *exec.Cmd {
+	d := exec.Command("sh", append([]string{"-c", `export LISTEN_PID=$$; exec "$@"`, "sh"}, daemonArgs...)...)
+	d.Env = append(append(append([]string{}, daemonEnv...), "LISTEN_FDS=1", "LISTEN_FDNAMES=services"), env...)
+	d.ExtraFiles = []*os.File{services}
+	d.Stdout, d.Stderr = os.Stderr, os.Stderr
+	return d
 }
 
 // clean drops what would reach the desktop the tests run on: its display

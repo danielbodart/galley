@@ -1,17 +1,18 @@
 // The socket, and each client's conversation over it.
 //
 // The socket is $XDG_RUNTIME_DIR/galley/sock, in a directory only this user
-// can open. systemd makes it and hands it over when the user units are
-// installed (LISTEN_FDS); a window started by hand binds it itself, having
-// checked the directory is private and that no other window is listening.
+// can open. systemd makes it and hands it over, as the fd named user, when
+// the user units are installed; a window started by hand binds it itself,
+// having checked the directory is private and that no other window is
+// listening.
 //
 // A conversation is the item: the window answers it on the connection that
 // asked, and a connection that closes first takes its item away unanswered.
 // See wire for the lines in each direction.
 //
-// $GALLEY_SERVICES_SOCKET, when set, is a second socket, for system users'
-// services: bound here, open to every user, and served only to those
-// $GALLEY_SERVICES names (services.js).
+// systemd may pass a second socket, named services, for system users'
+// services: open to every user, and served only to those $GALLEY_SERVICES
+// names (services.js).
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -31,6 +32,22 @@ const VERSION = 3;
 // escaping can at most make six times as long.
 const MAX_LINE = 100 * 1024 * 1024;
 
+// The sockets systemd passed this process, as a map of name to fd, taken
+// from the environment so that nothing this starts sees them as its own.
+export function passed() {
+    const fds = new Map();
+    const pid = new Gio.Credentials().get_unix_pid();
+    if (GLib.getenv('LISTEN_PID') === String(pid)) {
+        const names = (GLib.getenv('LISTEN_FDNAMES') ?? '').split(':');
+        const n = Number(GLib.getenv('LISTEN_FDS'));
+        for (let i = 0; i < n; i++)
+            fds.set(names[i], 3 + i);
+    }
+    for (const name of ['LISTEN_PID', 'LISTEN_FDS', 'LISTEN_FDNAMES'])
+        GLib.unsetenv(name);
+    return fds;
+}
+
 export class Server {
     constructor(window) {
         this.window = window;
@@ -42,41 +59,28 @@ export class Server {
         });
         this.bound = null;
         this.services = null;
-        this.servicesBound = null;
     }
 
-    // Binds path for the services in admitted, a map of uid to {name,
-    // label}, replacing whatever file is there.
-    listenServices(path, admitted) {
-        try {
-            Gio.File.new_for_path(path).delete(null);
-        } catch (e) {
-            // Nothing there.
-        }
+    // Serves the services in admitted, a map of uid to {name, label}, on
+    // systemd's socket fd.
+    listenServices(fd, admitted) {
+        const socket = Gio.Socket.new_from_fd(fd);
         this.services = new Gio.SocketService();
         this.services.connect('incoming', (_service, connection) => {
             this._serve(connection, admitted).catch(e => logError(e, 'galley: a service'));
             return true;
         });
-        this.services.add_address(new Gio.UnixSocketAddress({path}),
-            Gio.SocketType.STREAM, Gio.SocketProtocol.DEFAULT, null);
-        this.servicesBound = path;
-        Gio.File.new_for_path(path).set_attribute_uint32('unix::mode', 0o666,
-            Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
+        this.services.add_socket(socket, null);
         this.services.start();
     }
 
-    // Takes systemd's socket when there is one, else binds path. Throws when
-    // it can do neither.
-    listen(path) {
-        const pid = new Gio.Credentials().get_unix_pid();
-        if (GLib.getenv('LISTEN_PID') === String(pid) && GLib.getenv('LISTEN_FDS') === '1') {
-            for (const name of ['LISTEN_PID', 'LISTEN_FDS', 'LISTEN_FDNAMES'])
-                GLib.unsetenv(name);
-            this.service.add_socket(Gio.Socket.new_from_fd(3), null);
-        } else {
+    // Takes systemd's socket fd when there is one, else binds path. Throws
+    // when it can do neither.
+    listen(path, fd) {
+        if (fd === undefined)
             this._bind(path);
-        }
+        else
+            this.service.add_socket(Gio.Socket.new_from_fd(fd), null);
         this.service.start();
     }
 
@@ -118,11 +122,9 @@ export class Server {
             service?.stop();
             service?.close();
         }
-        for (const path of [this.bound, this.servicesBound]) {
-            if (!path)
-                continue;
+        if (this.bound) {
             try {
-                Gio.File.new_for_path(path).delete(null);
+                Gio.File.new_for_path(this.bound).delete(null);
             } catch (e) {
                 // Already gone.
             }

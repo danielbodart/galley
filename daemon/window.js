@@ -33,7 +33,7 @@
 // Every one of zenity's dialogs is an item here, including those that ask
 // nothing: a progress bar is a live item until it is done and answered, and
 // a notification is an entry that stays, once its client has gone, until
-// the person dismisses it.
+// the person dismisses it; a service's goes with its connection.
 //
 // The same question asked again while it waits is one row, not two: the
 // second asker joins the first, and one answer answers both. Only what is
@@ -241,11 +241,11 @@ export class QueueWindow {
             rows: rows => !record.done && follow.rows?.(rows),
             progress: update => !record.done && follow.progress?.(update),
             timeout: () => this._leave(record, attachment, {answer: 'timeout'}),
-            // A notification outlives its client, as zenity's does: it is
+            // A client's notification outlives it, as zenity's does: it is
             // the person's to dismiss, and its client goes only from those
-            // counted as asking it.
+            // counted as asking it. A service's goes with its connection.
             withdraw: () => {
-                if (record.item.kind === 'notification')
+                if (record.item.kind === 'notification' && !record.item.caller)
                     this._detach(record, attachment);
                 else
                     this._leave(record, attachment, null);
@@ -299,7 +299,7 @@ export class QueueWindow {
     // A --notification --listen: nothing until its first message, then one
     // entry whose text each message replaces, as each replaces zenity's
     // one notification -- or a new entry, once the person has dismissed it.
-    // Its entries stay when its client goes.
+    // Its entries stay when its client goes, unless it is a service.
     listen(item) {
         let current = null;
         return {
@@ -316,7 +316,10 @@ export class QueueWindow {
                     current = this._add({...item, text: message.text, icon, markup: false}, null);
                 }
             },
-            withdraw: () => {},
+            withdraw: () => {
+                if (item.caller && current)
+                    this._remove(current, false);
+            },
         };
     }
 

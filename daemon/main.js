@@ -5,8 +5,9 @@
 //
 //   galley-daemon
 //
-// $GALLEY_SERVICES_SOCKET and $GALLEY_SERVICES add the services' socket
-// (server.js, services.js).
+// systemd's services socket and $GALLEY_SERVICES let system users'
+// services post (server.js, services.js). Neither going wrong stops the
+// window serving its user.
 //
 // $GALLEY_SOCKET overrides where it listens, for tests. It does not make a
 // second window: the window is one application on the session bus, and
@@ -18,7 +19,7 @@ import Adw from 'gi://Adw?version=1';
 import System from 'system';
 
 import {QueueWindow} from './window.js';
-import {Server} from './server.js';
+import {Server, passed} from './server.js';
 import {admitted} from './services.js';
 import {Tray} from './tray.js';
 
@@ -32,7 +33,6 @@ GLib.set_application_name('galley');
 
 const socketPath = GLib.getenv('GALLEY_SOCKET') ||
     GLib.build_filenamev([GLib.get_user_runtime_dir(), 'galley', 'sock']);
-const servicesPath = GLib.getenv('GALLEY_SERVICES_SOCKET');
 
 // HANDLES_COMMAND_LINE, so that starting does not emit activate and show the
 // window: a socket-activated window is started by an item arriving, and
@@ -72,21 +72,17 @@ app.connect('startup', () => {
         window.tray = new Tray(bus, token => window.show(token), () => app.quit());
 
     server = new Server(window);
-    let path = socketPath;
+    const fds = passed();
     try {
-        server.listen(socketPath);
-        if (servicesPath) {
-            path = servicesPath;
-            const passwd = new TextDecoder().decode(GLib.file_get_contents('/etc/passwd')[1]);
-            server.listenServices(servicesPath, admitted(GLib.getenv('GALLEY_SERVICES'), passwd));
-        }
+        server.listen(socketPath, fds.get('user'));
     } catch (e) {
-        printerr(`galley: cannot listen on ${path}: ${e.message}`);
+        printerr(`galley: cannot listen on ${socketPath}: ${e.message}`);
         status = 1;
         app.release();
         app.quit();
         return;
     }
+    listenServices(fds.get('services'));
 
     const control = GLib.getenv('GALLEY_TEST_CONTROL');
     if (control) {
@@ -95,6 +91,27 @@ app.connect('startup', () => {
             .catch(() => printerr('galley: GALLEY_TEST_CONTROL is set, but this build has no test control'));
     }
 });
+
+function listenServices(fd) {
+    const names = GLib.getenv('GALLEY_SERVICES');
+    if (fd === undefined) {
+        if (names)
+            printerr('galley: GALLEY_SERVICES is set, but systemd passed no services socket');
+        return;
+    }
+    let admit = new Map();
+    try {
+        const passwd = new TextDecoder().decode(GLib.file_get_contents('/etc/passwd')[1]);
+        admit = admitted(names, passwd);
+    } catch (e) {
+        printerr(`galley: admitting no services: ${e.message}`);
+    }
+    try {
+        server.listenServices(fd, admit);
+    } catch (e) {
+        printerr(`galley: cannot serve the services socket: ${e.message}`);
+    }
+}
 
 app.connect('shutdown', () => server?.close());
 app.connect('command-line', () => 0);
