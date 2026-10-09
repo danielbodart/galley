@@ -356,14 +356,14 @@ started before the rest.
   on, lets such a process press buttons in any window; galley's is off it
   unless asked for, the rest of the desktop's is the desktop's boundary.
 - **Services post on their own socket.** With `services.galley.services`
-  set, systemd also listens on `/run/galley-ask/<user>.sock`, open to every
-  user, and a connection there starts the window too. The window serves
-  only the uids of the users named there, resolved from `/etc/passwd` at
-  start; anyone else is hung up on. A service's item is shown under its
-  label, never as markup, with galley's icon for its `level` -- normal,
-  warning or danger, which also has a banner -- is never shared with
-  another row, and goes when its service hangs up, a notification
-  included. An item a client sends with a `caller` is refused. A services
+  set, the window starts at login and binds `/run/galley-ask/<user>.sock`
+  itself, open to every user, so that a service finds the window, not
+  systemd, at the other end. It serves only the uids of the users named
+  there, resolved from `/etc/passwd` at start; anyone else is hung up on.
+  A service's item is shown under its label, never as markup, with
+  galley's icon for its `level` -- normal, warning or danger, which also
+  has a banner -- is never shared with another row, and goes when its
+  service hangs up, a notification included. An item a client sends with a `caller` is refused. A services
   socket or `$GALLEY_SERVICES` that cannot be set up is logged, and the
   window serves its user as before.
 - **The test control is not shipped.** The end-to-end check presses keys
@@ -376,15 +376,15 @@ started before the rest.
 | `services.galley.enable` | `false` | The socket, and the window it starts. |
 | `services.galley.package` | this flake's `galley` | The client and the window. |
 | `services.galley.accessibility` | `false` | Leave GTK's accessibility bus on for the window, as a screen reader needs. |
-| `services.galley.services` | `{ }` | System users whose services may post, by name, to the label shown for each, e.g. `{ ssh-signer = "SSH signer"; }`. Non-empty, `galley-services.socket` listens on `/run/galley-ask/<user>.sock`; the system makes that directory, 0755 and owned by the user. |
+| `services.galley.services` | `{ }` | System users whose services may post, by name, to the label shown for each, e.g. `{ ssh-signer = "SSH signer"; }`. Non-empty, the window starts at login and binds `/run/galley-ask/<user>.sock`; the system makes that directory, 0755 and owned by the user. |
 
 Package: `galley` (`bin/galley`, `bin/galley-daemon`). `$GALLEY_SOCKET`
 overrides the socket's path for the client and the window, for tests.
-The window takes systemd's sockets by name, `user` and `services`, and
-`$GALLEY_SERVICES` is a JSON object of user name to label. `$GALLEY_SOCKET`
-does not make a second window: the window is
-one application on the session bus, and a second `galley-daemon` in the
-same session says so and exits 1 rather than leave its socket unserved.
+`$GALLEY_SERVICES_SOCKET` is the services' socket, and `$GALLEY_SERVICES`
+a JSON object of user name to label. `$GALLEY_SOCKET` does not make a
+second window: the window is one application on the session bus, and a
+second `galley-daemon` in the same session says so and exits 1 rather than
+leave its socket unserved.
 
 ## Development
 

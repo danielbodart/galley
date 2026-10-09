@@ -35,6 +35,7 @@ var (
 	// How the window was started, for a test that starts another.
 	daemonArgs []string
 	daemonEnv  []string
+	daemonPid  int
 )
 
 func TestMain(m *testing.M) {
@@ -84,22 +85,21 @@ func setUp(daemon, broadwayd string, m *testing.M) (int, error) {
 		return 0, err
 	}
 	daemonArgs, daemonEnv = strings.Fields(daemon), env
-	services, err := listening(filepath.Join(dir, "services"))
-	if err != nil {
-		return 0, err
-	}
-	d := withServices(services, "GALLEY_TEST_CONTROL="+filepath.Join(dir, "ctl"),
+	d := exec.Command(daemonArgs[0], daemonArgs[1:]...)
+	d.Env = append(env, "GALLEY_TEST_CONTROL="+filepath.Join(dir, "ctl"),
+		"GALLEY_SERVICES_SOCKET="+filepath.Join(dir, "services"),
 		fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
-	err = d.Start()
-	services.Close()
-	if err != nil {
+	d.Stdout, d.Stderr = os.Stderr, os.Stderr
+	if err := d.Start(); err != nil {
 		return 0, err
 	}
 	defer d.Process.Kill()
+	daemonPid = d.Process.Pid
 	for i := 0; ; i++ {
 		_, a := os.Stat(filepath.Join(dir, "galley", "sock"))
 		_, b := os.Stat(filepath.Join(dir, "ctl"))
-		if a == nil && b == nil {
+		_, c := os.Stat(filepath.Join(dir, "services"))
+		if a == nil && b == nil && c == nil {
 			break
 		}
 		if i > 300 {
@@ -122,18 +122,12 @@ func listening(path string) (*os.File, error) {
 	return l.File()
 }
 
-// withServices is the window as systemd starts it with its services socket
-// passed: fd 3, named services, in LISTEN_FDS for its own pid.
-func withServices(services *os.File, env ...string) *exec.Cmd {
-	return activated("services", []*os.File{services}, env...)
-}
-
-// activated is the window as systemd starts it with files passed from fd 3
-// on, named as names, a colon-separated list, has them.
-func activated(names string, files []*os.File, env ...string) *exec.Cmd {
+// activated is the window as systemd starts it with its socket passed as
+// fd 3, named name, in LISTEN_FDS for its own pid.
+func activated(name string, socket *os.File, env ...string) *exec.Cmd {
 	d := exec.Command("sh", append([]string{"-c", `export LISTEN_PID=$$; exec "$@"`, "sh"}, daemonArgs...)...)
-	d.Env = append(append(append([]string{}, daemonEnv...), fmt.Sprintf("LISTEN_FDS=%d", len(files)), "LISTEN_FDNAMES="+names), env...)
-	d.ExtraFiles = files
+	d.Env = append(append(append([]string{}, daemonEnv...), "LISTEN_FDS=1", "LISTEN_FDNAMES="+name), env...)
+	d.ExtraFiles = []*os.File{socket}
 	d.Stdout, d.Stderr = os.Stderr, os.Stderr
 	return d
 }

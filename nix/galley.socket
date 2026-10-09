@@ -7,7 +7,6 @@ Description=galley's question queue (socket)
 ListenStream=%t/galley/sock
 SocketMode=0600
 DirectoryMode=0700
-FileDescriptorName=user
 
 [Install]
 WantedBy=sockets.target

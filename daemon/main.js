@@ -5,9 +5,9 @@
 //
 //   galley-daemon
 //
-// systemd's services socket and $GALLEY_SERVICES let system users'
-// services post (server.js, services.js). Neither going wrong stops the
-// window serving its user.
+// $GALLEY_SERVICES_SOCKET and $GALLEY_SERVICES let system users' services
+// post (server.js, services.js). Neither going wrong stops the window
+// serving its user.
 //
 // $GALLEY_SOCKET overrides where it listens, for tests. It does not make a
 // second window: the window is one application on the session bus, and
@@ -33,6 +33,7 @@ GLib.set_application_name('galley');
 
 const socketPath = GLib.getenv('GALLEY_SOCKET') ||
     GLib.build_filenamev([GLib.get_user_runtime_dir(), 'galley', 'sock']);
+const servicesPath = GLib.getenv('GALLEY_SERVICES_SOCKET');
 
 // HANDLES_COMMAND_LINE, so that starting does not emit activate and show the
 // window: a socket-activated window is started by an item arriving, and
@@ -72,9 +73,8 @@ app.connect('startup', () => {
         window.tray = new Tray(bus, token => window.show(token), () => app.quit());
 
     server = new Server(window);
-    const fds = passed();
     try {
-        server.listen(socketPath, fds.get('user'));
+        server.listen(socketPath, passed());
     } catch (e) {
         printerr(`galley: cannot listen on ${socketPath}: ${e.message}`);
         status = 1;
@@ -82,7 +82,7 @@ app.connect('startup', () => {
         app.quit();
         return;
     }
-    listenServices(fds.get('services'));
+    listenServices();
 
     const control = GLib.getenv('GALLEY_TEST_CONTROL');
     if (control) {
@@ -92,15 +92,15 @@ app.connect('startup', () => {
     }
 });
 
-function listenServices(fd) {
+function listenServices() {
     const names = GLib.getenv('GALLEY_SERVICES');
-    if (fd === undefined) {
+    if (!servicesPath) {
         if (names)
-            printerr('galley: GALLEY_SERVICES is set, but systemd passed no services socket');
+            printerr('galley: GALLEY_SERVICES is set, but GALLEY_SERVICES_SOCKET is not');
         return;
     }
     if (!names)
-        printerr('galley: systemd passed a services socket, but GALLEY_SERVICES is not set, so it admits no one');
+        printerr('galley: GALLEY_SERVICES_SOCKET is set, but GALLEY_SERVICES is not, so it admits no one');
     let admit = new Map();
     try {
         const passwd = new TextDecoder().decode(GLib.file_get_contents('/etc/passwd')[1]);
@@ -109,9 +109,9 @@ function listenServices(fd) {
         printerr(`galley: admitting no services: ${e.message}`);
     }
     try {
-        server.listenServices(fd, admit);
+        server.listenServices(servicesPath, admit);
     } catch (e) {
-        printerr(`galley: cannot serve the services socket: ${e.message}`);
+        printerr(`galley: cannot listen on ${servicesPath}: ${e.message}`);
     }
 }
 

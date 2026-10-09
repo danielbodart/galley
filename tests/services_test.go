@@ -220,23 +220,17 @@ func TestAServiceRowStaysUntilWithdrawn(t *testing.T) {
 }
 
 // second starts another window, its own socket in a directory of its own,
-// with services as its services socket, or with none when it is nil.
-func second(t *testing.T, services *os.File, env ...string) string {
+// and waits for path, when it is not empty, to be a socket.
+func second(t *testing.T, path string, env ...string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp(runtimeDir, "w")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sock := filepath.Join(dir, "sock")
-	env = append(env, "GALLEY_SOCKET="+sock)
-	var d *exec.Cmd
-	if services == nil {
-		d = exec.Command(daemonArgs[0], daemonArgs[1:]...)
-		d.Env = append(append([]string{}, daemonEnv...), env...)
-		d.Stdout, d.Stderr = os.Stderr, os.Stderr
-	} else {
-		d = withServices(services, env...)
-	}
+	d := exec.Command(daemonArgs[0], daemonArgs[1:]...)
+	d.Env = append(append(append([]string{}, daemonEnv...), env...), "GALLEY_SOCKET="+sock)
+	d.Stdout, d.Stderr = os.Stderr, os.Stderr
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -244,31 +238,24 @@ func second(t *testing.T, services *os.File, env ...string) string {
 		d.Process.Kill()
 		d.Wait()
 	})
-	for i := 0; ; i++ {
-		if _, err := os.Stat(sock); err == nil {
-			break
-		}
-		if i > 300 {
-			t.Fatal("the second window did not start listening")
-		}
-		time.Sleep(50 * time.Millisecond)
+	waitForSocket(t, sock)
+	if path != "" {
+		waitForSocket(t, path)
 	}
 	return sock
 }
 
-func servicesSocket(t *testing.T) (*os.File, string) {
+func waitForSocket(t *testing.T, path string) {
 	t.Helper()
-	dir, err := os.MkdirTemp(runtimeDir, "s")
-	if err != nil {
-		t.Fatal(err)
+	for i := 0; ; i++ {
+		if info, err := os.Stat(path); err == nil && info.Mode()&os.ModeSocket != 0 {
+			return
+		}
+		if i > 300 {
+			t.Fatalf("nothing listening on %s", path)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	path := filepath.Join(dir, "services")
-	f, err := listening(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { f.Close() })
-	return f, path
 }
 
 func hungUp(t *testing.T, p *service) {
@@ -285,11 +272,47 @@ func serves(t *testing.T, sock string) {
 	p.answer(t, `{"shown":true}`)
 }
 
-// A window whose services are someone else hangs up on this user.
-func TestAnUnlistedUidIsReset(t *testing.T) {
+// A service connecting finds the window itself at the other end, as frisket
+// checks, not whatever made the socket.
+func TestAServicesPeerIsTheWindow(t *testing.T) {
 	need(t)
-	f, path := servicesSocket(t)
-	serves(t, second(t, f, `GALLEY_SERVICES={"root":"Root"}`))
+	c, err := net.Dial("unix", filepath.Join(runtimeDir, "services"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	raw, err := c.(*net.UnixConn).SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cred *syscall.Ucred
+	raw.Control(func(fd uintptr) {
+		cred, err = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(cred.Pid) != daemonPid {
+		t.Errorf("peer pid %d, the window's %d", cred.Pid, daemonPid)
+	}
+}
+
+// A window whose services are someone else: a stale file where its socket
+// goes is replaced, the socket is open to all, and this user is hung up on.
+func TestAnUnlistedUidIsResetAndAStaleSocketIsReplaced(t *testing.T) {
+	need(t)
+	dir, err := os.MkdirTemp(runtimeDir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "services")
+	if err := os.WriteFile(path, []byte("stale"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	serves(t, second(t, path, "GALLEY_SERVICES_SOCKET="+path, `GALLEY_SERVICES={"root":"Root"}`))
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o666 {
+		t.Errorf("services socket %v, %v", info, err)
+	}
 	hungUp(t, post(t, path, serviceQuestion("normal", "x")))
 }
 
@@ -298,20 +321,16 @@ func TestBrokenServicesLeaveTheUsersSocket(t *testing.T) {
 	need(t)
 	me, _ := user.Current()
 	t.Run("a bad GALLEY_SERVICES admits no one", func(t *testing.T) {
-		f, path := servicesSocket(t)
-		serves(t, second(t, f, fmt.Sprintf(`GALLEY_SERVICES={%q:1}`, me.Username)))
+		path := filepath.Join(runtimeDir, "bad")
+		serves(t, second(t, path, "GALLEY_SERVICES_SOCKET="+path, fmt.Sprintf(`GALLEY_SERVICES={%q:1}`, me.Username)))
 		hungUp(t, post(t, path, serviceQuestion("normal", "x")))
 	})
-	t.Run("a services fd that is not a socket", func(t *testing.T) {
-		f, err := os.Open(os.DevNull)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer f.Close()
-		serves(t, second(t, f, fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username)))
+	t.Run("a services socket that cannot be bound", func(t *testing.T) {
+		serves(t, second(t, "", "GALLEY_SERVICES_SOCKET="+filepath.Join(runtimeDir, "nowhere", "services"),
+			fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username)))
 	})
 	t.Run("GALLEY_SERVICES with no services socket", func(t *testing.T) {
-		serves(t, second(t, nil, fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username)))
+		serves(t, second(t, "", fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username)))
 	})
 }
 
@@ -332,51 +351,32 @@ func TestAServiceNotificationGoesWithItsConnection(t *testing.T) {
 	waitFor(t, "the listening notification to go", items(0))
 }
 
-// The window takes the user's socket from systemd by its name, in either
-// order beside the services socket, or as the one fd passed whatever its
-// name, rather than binding the path systemd holds.
+// The window takes the one socket systemd passes, whatever its name, rather
+// than binding the path systemd holds.
 func TestTheUsersSocketFromSystemd(t *testing.T) {
 	need(t)
-	me, _ := user.Current()
-	for _, names := range []string{"user:services", "services:user", "", "galley.socket"} {
-		t.Run(names, func(t *testing.T) {
+	for _, name := range []string{"user", "", "galley.socket"} {
+		t.Run(name, func(t *testing.T) {
 			dir, err := os.MkdirTemp(runtimeDir, "a")
 			if err != nil {
 				t.Fatal(err)
 			}
-			paths := map[string]string{}
-			var files []*os.File
-			for _, name := range strings.Split(names, ":") {
-				path := filepath.Join(dir, fmt.Sprint(len(files)))
-				f, err := listening(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer f.Close()
-				if name != "services" {
-					name = "user"
-				}
-				paths[name] = path
-				files = append(files, f)
+			path := filepath.Join(dir, "sock")
+			f, err := listening(path)
+			if err != nil {
+				t.Fatal(err)
 			}
-			d := activated(names, files, "GALLEY_SOCKET="+paths["user"], fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
-			if err := d.Start(); err != nil {
+			d := activated(name, f, "GALLEY_SOCKET="+path)
+			err = d.Start()
+			f.Close()
+			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
 				d.Process.Kill()
 				d.Wait()
 			})
-			for _, f := range files {
-				f.Close()
-			}
-			serves(t, paths["user"])
-			if path, ok := paths["services"]; ok {
-				p := post(t, path, `{"galley":3,"show":true}`)
-				if line, _ := p.r.ReadString('\n'); !strings.Contains(line, "error") {
-					t.Errorf("services reply = %q", line)
-				}
-			}
+			serves(t, path)
 		})
 	}
 }
