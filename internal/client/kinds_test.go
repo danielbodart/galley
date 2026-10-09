@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielbodart/galley/internal/wire"
+	"github.com/danielbodart/galley/wire"
 )
 
 func str(s string) *string { return &s }

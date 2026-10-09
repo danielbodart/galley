@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/danielbodart/galley/internal/wire"
+	"github.com/danielbodart/galley/wire"
 )
 
 // Output is what zenity prints for an answer, and the outcome it exits

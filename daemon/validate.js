@@ -9,11 +9,12 @@
 // sizes clamped, titles and labels cut short, more than 16 buttons refused
 // (internal/zenity/args.go) -- so only an item written by hand meets them.
 
-// The kinds each protocol version knows (internal/wire).
+// The kinds each protocol version knows (wire).
 const KINDS_1 = ['question', 'info', 'warning', 'error', 'entry', 'text'];
 const KINDS_2 = [...KINDS_1, 'list', 'forms', 'calendar', 'scale', 'password', 'color',
     'file', 'progress', 'notification', 'about'];
-const KINDS = {1: new Set(KINDS_1), 2: new Set(KINDS_2)};
+const KINDS = {1: new Set(KINDS_1), 2: new Set(KINDS_2), 3: new Set(KINDS_2)};
+const LEVELS = new Set(['normal', 'warning', 'danger']);
 const ANSWERS = new Set(['ok', 'cancel', 'extra', 'close']);
 const FIELDS = new Set(['entry', 'password', 'multiline', 'calendar', 'list', 'combo']);
 
@@ -73,6 +74,8 @@ export function validate(raw, version = 1) {
         throw new Error('no item');
     if (!KINDS[version]?.has(raw.kind))
         throw new Error(`kind ${JSON.stringify(raw.kind)} is not one galley shows`);
+    if ('caller' in raw)
+        throw new Error('caller is the window\'s to set');
     if (!Array.isArray(raw.buttons) || raw.buttons.length > 16)
         throw new Error('buttons is not a list of at most 16');
 
@@ -109,7 +112,10 @@ export function validate(raw, version = 1) {
         buttons,
         default: int(raw.default, 'default', -1, buttons.length - 1, -1),
         locale: version >= 2 ? string(raw.locale, 'locale', 256) : '',
+        level: version >= 3 ? string(raw.level, 'level', 16, 'normal') : 'normal',
     };
+    if (!LEVELS.has(item.level))
+        throw new Error(`level ${JSON.stringify(item.level)} is not one galley shows`);
     if (item.locale && !/^[A-Za-z0-9_.@=-]*$/.test(item.locale))
         throw new Error('locale is not a locale name');
     const part = name => raw[name] ?? {};
@@ -169,6 +175,9 @@ export function validate(raw, version = 1) {
                 if (typeof field !== 'object' || field === null || !FIELDS.has(field.kind))
                     throw new Error(`${n} is not a field galley shows`);
                 const columns = strings(field.columns, `${n} columns`, MAX_COLUMNS, 1024);
+                const text = version >= 3 ? string(field.text, `${n} text`, 1 << 16) : '';
+                if (text && field.kind === 'password')
+                    throw new Error(`${n} is a password and has no text`);
                 return {
                     kind: field.kind,
                     label: string(field.label, `${n} label`, 1024),
@@ -177,6 +186,7 @@ export function validate(raw, version = 1) {
                     showHeader: bool(field.showHeader),
                     values: field.values === undefined || field.values === null
                         ? null : strings(field.values, `${n} values`, MAX_ROWS, MAX_CELL),
+                    text: field.kind === 'entry' || field.kind === 'multiline' ? text : '',
                 };
             }),
         };

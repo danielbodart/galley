@@ -6,7 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/danielbodart/galley/internal/wire"
+	"github.com/danielbodart/galley/wire"
 )
 
 // What zenity reads from stdin, a line at a time, for the dialogs that

@@ -7,7 +7,7 @@
 //
 // A conversation is the item: the window answers it on the connection that
 // asked, and a connection that closes first takes its item away unanswered.
-// See internal/wire for the lines in each direction.
+// See wire for the lines in each direction.
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -16,10 +16,10 @@ import {validate, rows, progressUpdate, notify} from './validate.js';
 
 Gio._promisify(Gio.DataInputStream.prototype, 'read_line_async', 'read_line_finish_utf8');
 
-// The protocol versions this window takes (internal/wire): any from the
+// The protocol versions this window takes (wire): any from the
 // first to its own, so a client older than the window still reaches it.
 const MIN_VERSION = 1;
-const VERSION = 2;
+const VERSION = 3;
 
 // The longest line a client may send: a text-info's whole file arrives in
 // its first, and the client caps that at 16 MiB of text, which JSON's

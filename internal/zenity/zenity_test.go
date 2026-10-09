@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielbodart/galley/internal/wire"
+	"github.com/danielbodart/galley/wire"
 )
 
 func TestCompressIsGStrcompress(t *testing.T) {

@@ -309,7 +309,7 @@ and mnemonics are undone in the client, where they are tested, and the
 window only draws. What the window answers is what was chosen -- rows, a
 form's values, a date, paths -- and the client prints it as zenity would.
 
-The protocol (`internal/wire`) is versioned, each version the last with
+The protocol (`wire`) is versioned, each version the last with
 fields added. A client sends the lowest version its item needs, and the
 window takes any from the first to its own, so a client of either age
 reaches a window of either age for what both know: the window runs on

@@ -22,8 +22,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/danielbodart/galley/internal/wire"
 	"github.com/danielbodart/galley/internal/zenity"
+	"github.com/danielbodart/galley/wire"
 )
 
 // Env is everything Main reads from the world, so tests can supply it.

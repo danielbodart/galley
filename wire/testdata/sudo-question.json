@@ -1,0 +1,1 @@
+{"galley":3,"item":{"kind":"question","level":"danger","title":"sudo systemctl stop sshd.service","text":"touches a unit that guards this machine\n\nclaude (pid 5113) ← bash\n/run/current-system/sw/bin/systemctl stop sshd.service","buttons":[{"answer":"cancel","label":"Refuse","underline":-1},{"answer":"extra","index":0,"label":"Allow","underline":-1}],"default":-1}}

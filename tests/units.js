@@ -151,8 +151,8 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
         {text: '', hidden: false});
     check('a form', v2({kind: 'forms', buttons: [], forms: {fields: [{kind: 'list', label: 'L'}, {kind: 'combo'}]}}).forms,
         {dateFormat: '%x', fields: [
-            {kind: 'list', label: 'L', columns: ['column'], rows: [], showHeader: false, values: null},
-            {kind: 'combo', label: '', columns: ['column'], rows: [], showHeader: false, values: null}]});
+            {kind: 'list', label: 'L', columns: ['column'], rows: [], showHeader: false, values: null, text: ''},
+            {kind: 'combo', label: '', columns: ['column'], rows: [], showHeader: false, values: null, text: ''}]});
     check('a disabled button', v2({kind: 'progress', buttons: [{answer: 'ok', label: 'OK', disabled: true}]}).buttons[0].disabled,
         true);
     check('a first-protocol button is never disabled',
@@ -177,6 +177,40 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
         {finished: false, closed: true, percentage: 50, text: '<b>x</b>'});
     throws('a progress update past 100', () => progressUpdate({percentage: 200}), /percentage/);
     check('a notification', notify({text: 'hi', icon: 'x', extra: 1}), {text: 'hi', icon: 'x'});
+}
+
+// ---- the third protocol's items --------------------------------------------
+
+{
+    const v3 = raw => validate(raw, 3);
+    check('no level is normal', v3({kind: 'question', buttons: []}).level, 'normal');
+    check('a level', v3({kind: 'question', buttons: [], level: 'danger'}).level, 'danger');
+    check('a second-protocol level is normal', validate({kind: 'question', buttons: [], level: 'danger'}, 2).level,
+        'normal');
+    const fields = v3({kind: 'forms', buttons: [], forms: {fields: [
+        {kind: 'entry', text: '15'}, {kind: 'multiline', text: 'a\nb'}, {kind: 'combo', text: 'x'}]}}).forms.fields;
+    check('a field\'s text', fields.map(f => f.text), ['15', 'a\nb', '']);
+    check('a second-protocol field has no text',
+        validate({kind: 'forms', buttons: [], forms: {fields: [{kind: 'entry', text: '15'}]}}, 2).forms.fields[0].text, '');
+
+    const bad = (name, raw, pattern) => throws(name, () => v3(raw), pattern);
+    bad('a level galley does not know', {kind: 'question', buttons: [], level: 'red'}, /level/);
+    bad('a password with text', {kind: 'forms', buttons: [], forms: {fields: [{kind: 'password', text: 'x'}]}},
+        /password/);
+    bad('a caller', {kind: 'question', buttons: [], caller: {uid: 0, name: 'root', label: 'root', pid: 1}}, /caller/);
+    throws('a caller in any protocol', () => validate({kind: 'question', buttons: [], caller: null}), /caller/);
+
+    // The golden files the wire package reads, as the window reads them.
+    const golden = name => JSON.parse(new TextDecoder().decode(GLib.file_get_contents(`wire/testdata/${name}`)[1]));
+    for (const [name, level] of [['signer-form.json', 'normal'], ['signer-question.json', 'warning'],
+        ['sudo-dialog.json', 'normal'], ['sudo-dialog-warning.json', 'warning'],
+        ['sudo-dialog-danger.json', 'danger'], ['sudo-question.json', 'danger']]) {
+        const hello = golden(name);
+        const item = validate(hello.item, hello.galley);
+        check(`${name}'s level`, item.level, level);
+        check(`${name}'s fields`, item.forms?.fields.map(f => [f.kind, f.text]),
+            hello.item.forms?.fields.map(f => [f.kind, f.text ?? '']));
+    }
 }
 
 // ---- the same question -------------------------------------------------------

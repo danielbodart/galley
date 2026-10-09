@@ -20,7 +20,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"github.com/danielbodart/galley/internal/wire"
+	"github.com/danielbodart/galley/wire"
 )
 
 // Error is a command line zenity would refuse, or one galley does. Its

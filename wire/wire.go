@@ -22,18 +22,19 @@
 // Version 1 is the first window's: --question, --info, --warning, --error,
 // --entry and --text-info, read-only. Version 2 adds every other dialog,
 // the fields they need, and the lines that go with them: Follow's Rows,
-// Progress and Notify, and Answer's Partial and Queued. Each version's lines
-// are the earlier one's with fields added, never changed. A client sends the
-// lowest version its item needs (Needs), so an item that version 1 could
-// carry still reaches a window started before version 2 -- the window is
-// long-running, and outlives the client package it came with -- and the
-// window takes any version from 1 to its own.
+// Progress and Notify, and Answer's Partial and Queued. Version 3 adds an
+// item's Level, a form field's Text and the Caller the window sets. Each
+// version's lines are the earlier one's with fields added, never changed. A
+// client sends the lowest version its item needs (Needs), so an item that
+// version 1 could carry still reaches a window started before version 2 --
+// the window is long-running, and outlives the client package it came with
+// -- and the window takes any version from 1 to its own.
 package wire
 
 // Version is the newest the window speaks. MinVersion is the oldest it
 // still takes: it refuses anything outside them rather than guessing.
 const (
-	Version    = 2
+	Version    = 3
 	MinVersion = 1
 )
 
@@ -106,6 +107,29 @@ type Item struct {
 	File     *File     `json:"file,omitempty"`
 	Progress *Progress `json:"progress,omitempty"`
 	Note     *Note     `json:"note,omitempty"`
+
+	// Version 3.
+
+	// Level is LevelNormal, LevelWarning or LevelDanger; absent is normal.
+	Level string `json:"level,omitempty"`
+	// Caller is set by the window from the connection's peer. A client
+	// that sends one is refused.
+	Caller *Caller `json:"caller,omitempty"`
+}
+
+// An item's levels.
+const (
+	LevelNormal  = "normal"
+	LevelWarning = "warning"
+	LevelDanger  = "danger"
+)
+
+// Caller is who posted an item.
+type Caller struct {
+	UID   int    `json:"uid"`
+	Name  string `json:"name"`
+	Label string `json:"label"`
+	PID   int    `json:"pid"`
 }
 
 // Button is one of an item's answers.
@@ -188,6 +212,9 @@ type Field struct {
 	ShowHeader bool       `json:"showHeader,omitempty"`
 	// A combo's values; none, and it has nothing to pick.
 	Values []string `json:"values,omitempty"`
+	// Text is an entry or multiline field's starting text; on a password
+	// field it is refused. Version 3.
+	Text string `json:"text,omitempty"`
 }
 
 // A form's fields.
@@ -367,8 +394,18 @@ type FieldValue struct {
 }
 
 // Needs is the lowest version that carries item: 1 for what the first
-// window showed, 2 for anything after.
+// window showed, 3 for a level or a field's text, 2 for anything else.
 func Needs(item *Item) int {
+	if item.Level != "" {
+		return 3
+	}
+	if item.Forms != nil {
+		for _, f := range item.Forms.Fields {
+			if f.Text != "" {
+				return 3
+			}
+		}
+	}
 	switch item.Kind {
 	case KindQuestion, KindInfo, KindWarning, KindError:
 	case KindEntry:

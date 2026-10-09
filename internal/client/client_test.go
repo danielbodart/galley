@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielbodart/galley/internal/wire"
+	"github.com/danielbodart/galley/wire"
 )
 
 // window is a stand-in for the real one: it accepts one client, hands the

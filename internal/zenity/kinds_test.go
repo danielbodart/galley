@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielbodart/galley/internal/wire"
+	"github.com/danielbodart/galley/wire"
 )
 
 // What zenity 4.2.2 says to each of these before it opens a window -- its
