@@ -43,6 +43,27 @@ export function passed() {
     return fd;
 }
 
+// Clears path for a socket, throwing when it is too long to bind or a
+// window is listening there.
+function replace(path) {
+    // sun_path holds 107 bytes and a NUL; GLib would cut a longer path
+    // short and bind somewhere no client looks.
+    if (new TextEncoder().encode(path).length > 107)
+        throw new Error('the path is longer than a unix socket address holds');
+    if (!GLib.file_test(path, GLib.FileTest.EXISTS))
+        return;
+    let live = false;
+    try {
+        new Gio.SocketClient().connect(new Gio.UnixSocketAddress({path}), null).close(null);
+        live = true;
+    } catch (e) {
+        // Nothing listening: a window that went without cleaning up.
+    }
+    if (live)
+        throw new Error(`another window is already listening on ${path}`);
+    Gio.File.new_for_path(path).delete(null);
+}
+
 export class Server {
     constructor(window) {
         this.window = window;
@@ -58,24 +79,26 @@ export class Server {
     }
 
     // Binds path for the services in admitted, a map of uid to {name,
-    // label}, replacing whatever file is there.
+    // label}, replacing whatever file is there unless a window listens on it.
     listenServices(path, admitted) {
-        try {
-            Gio.File.new_for_path(path).delete(null);
-        } catch (e) {
-            // Nothing there.
-        }
-        this.services = new Gio.SocketService();
-        this.services.connect('incoming', (_service, connection) => {
+        replace(path);
+        const service = new Gio.SocketService();
+        service.connect('incoming', (_service, connection) => {
             this._serve(connection, admitted).catch(e => logError(e, 'galley: a service'));
             return true;
         });
-        this.services.add_address(new Gio.UnixSocketAddress({path}),
+        service.add_address(new Gio.UnixSocketAddress({path}),
             Gio.SocketType.STREAM, Gio.SocketProtocol.DEFAULT, null);
+        try {
+            Gio.File.new_for_path(path).set_attribute_uint32('unix::mode', 0o666,
+                Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
+        } catch (e) {
+            service.close();
+            Gio.File.new_for_path(path).delete(null);
+            throw e;
+        }
+        this.services = service;
         this.servicesBound = path;
-        Gio.File.new_for_path(path).set_attribute_uint32('unix::mode', 0o666,
-            Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
-        this.services.start();
     }
 
     // Takes systemd's socket fd when there is one, else binds path. Throws
@@ -89,10 +112,6 @@ export class Server {
     }
 
     _bind(path) {
-        // sun_path holds 107 bytes and a NUL; GLib would cut a longer path
-        // short and bind somewhere no client looks.
-        if (new TextEncoder().encode(path).length > 107)
-            throw new Error('the path is longer than a unix socket address holds');
         const dir = GLib.path_get_dirname(path);
         GLib.mkdir_with_parents(dir, 0o700);
         const info = Gio.File.new_for_path(dir).query_info(
@@ -101,19 +120,7 @@ export class Server {
             info.get_attribute_uint32('unix::uid') !== this.uid ||
             (info.get_attribute_uint32('unix::mode') & 0o077) !== 0)
             throw new Error(`${dir} is not a directory only this user can open (type ${info.get_file_type()}, uid ${info.get_attribute_uint32("unix::uid")}, mode ${info.get_attribute_uint32("unix::mode").toString(8)})`);
-
-        if (GLib.file_test(path, GLib.FileTest.EXISTS)) {
-            let live = false;
-            try {
-                new Gio.SocketClient().connect(new Gio.UnixSocketAddress({path}), null).close(null);
-                live = true;
-            } catch (e) {
-                // Nothing listening: a window that went without cleaning up.
-            }
-            if (live)
-                throw new Error(`another window is already listening on ${path}`);
-            Gio.File.new_for_path(path).delete(null);
-        }
+        replace(path);
         this.service.add_address(new Gio.UnixSocketAddress({path}),
             Gio.SocketType.STREAM, Gio.SocketProtocol.DEFAULT, null);
         Gio.File.new_for_path(path).set_attribute_uint32('unix::mode', 0o600,

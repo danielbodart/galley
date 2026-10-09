@@ -1,8 +1,9 @@
 # galley's window as a socket-activated user service, for home-manager.
 #
-# The socket is always there; the window starts on the first question and
-# stays, holding the queue, until the session ends. Nothing here puts galley
-# where zenity was: a caller names galley.
+# The socket is always there; the window starts on the first question, or at
+# login when services are set, and stays, holding the queue, until the
+# session ends. Nothing here puts galley where zenity was: a caller names
+# galley.
 self:
 { config, lib, pkgs, ... }:
 
@@ -80,6 +81,9 @@ in
         ExecStart = "${cfg.package}/bin/galley-daemon";
       } // lib.optionalAttrs (environment != [ ]) {
         Environment = environment;
+      } // lib.optionalAttrs (cfg.services != { }) {
+        # Nothing else brings the services' socket back.
+        Restart = "on-failure";
       };
     } // lib.optionalAttrs (cfg.services != { }) {
       # The window binds the services' socket itself, so that a service's

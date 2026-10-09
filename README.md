@@ -363,9 +363,9 @@ started before the rest.
   A service's item is shown under its label, never as markup, with
   galley's icon for its `level` -- normal, warning or danger, which also
   has a banner -- is never shared with another row, and goes when its
-  service hangs up, a notification included. An item a client sends with a `caller` is refused. A services
-  socket or `$GALLEY_SERVICES` that cannot be set up is logged, and the
-  window serves its user as before.
+  service hangs up, a notification included. An item a client sends with
+  a `caller` is refused. A services socket or `$GALLEY_SERVICES` that
+  cannot be set up is logged, and the window serves its user as before.
 - **The test control is not shipped.** The end-to-end check presses keys
   through `daemon/test-control.js`; the package leaves that file out.
 

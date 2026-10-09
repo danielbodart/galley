@@ -2,8 +2,8 @@
 # the check needs no home-manager input: the socket private, the service
 # running the window without the accessibility bus unless asked and with
 # nothing else of the session's environment changed, the services' socket
-# and starting at login only when services are named, and galley under its
-# own name only.
+# and starting at login and again on failure only when services are named,
+# and galley under its own name only.
 { pkgs, lib, self }:
 
 let
@@ -34,6 +34,7 @@ assert lib.assertMsg (withServices.systemd.user.sockets == on.systemd.user.socke
 assert lib.assertMsg (!(on.systemd.user.services.galley ? Install)) "the window starts at login with no services";
 assert lib.assertMsg (withServices.systemd.user.services.galley.Install.WantedBy == [ "graphical-session.target" ]) "the window with services does not start at login";
 assert lib.assertMsg (lib.elem "graphical-session.target" withServices.systemd.user.services.galley.Unit.After) "the window with services not after the session";
+assert lib.assertMsg (withServices.systemd.user.services.galley.Service.Restart == "on-failure") "the window with services not restarted";
 assert lib.assertMsg (service.ExecStart == "${self.packages.${pkgs.stdenv.hostPlatform.system}.galley}/bin/galley-daemon") "service runs ${service.ExecStart}";
 assert lib.assertMsg (service.Environment == [ "GTK_A11Y=none" ]) "service environment ${toString (service.Environment or [ ])}";
 assert lib.assertMsg (builtins.attrNames service == [ "Environment" "ExecStart" ]) "service sets ${toString (builtins.attrNames service)}: the window takes the session's environment whole, its bus for the settings portal";

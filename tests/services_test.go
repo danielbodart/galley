@@ -219,8 +219,8 @@ func TestAServiceRowStaysUntilWithdrawn(t *testing.T) {
 	waitFor(t, "the row to go", items(0))
 }
 
-// second starts another window, its own socket in a directory of its own,
-// and waits for path, when it is not empty, to be a socket.
+// second starts another window, its own socket and its log in a directory of
+// its own, and waits for path, when it is not empty, to be a socket.
 func second(t *testing.T, path string, env ...string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp(runtimeDir, "w")
@@ -230,13 +230,22 @@ func second(t *testing.T, path string, env ...string) string {
 	sock := filepath.Join(dir, "sock")
 	d := exec.Command(daemonArgs[0], daemonArgs[1:]...)
 	d.Env = append(append(append([]string{}, daemonEnv...), env...), "GALLEY_SOCKET="+sock)
-	d.Stdout, d.Stderr = os.Stderr, os.Stderr
+	log, err := os.Create(filepath.Join(dir, "log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	d.Stdout, d.Stderr = log, log
 	if err := d.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		d.Process.Kill()
 		d.Wait()
+		if t.Failed() {
+			b, _ := os.ReadFile(log.Name())
+			t.Logf("the window's log:\n%s", b)
+		}
 	})
 	waitForSocket(t, sock)
 	if path != "" {
@@ -265,18 +274,19 @@ func hungUp(t *testing.T, p *service) {
 	}
 }
 
-// The user's socket answers --show.
-func serves(t *testing.T, sock string) {
+// logged checks the log of the window second started on sock, once it has
+// served.
+func logged(t *testing.T, sock, want string) {
 	t.Helper()
-	p := post(t, sock, `{"galley":3,"show":true}`)
-	p.answer(t, `{"shown":true}`)
+	b, _ := os.ReadFile(filepath.Join(filepath.Dir(sock), "log"))
+	if !strings.Contains(string(b), want) {
+		t.Errorf("log %q, want %q", b, want)
+	}
 }
 
-// A service connecting finds the window itself at the other end, as frisket
-// checks, not whatever made the socket.
-func TestAServicesPeerIsTheWindow(t *testing.T) {
-	need(t)
-	c, err := net.Dial("unix", filepath.Join(runtimeDir, "services"))
+func peerPid(t *testing.T, path string) int {
+	t.Helper()
+	c, err := net.Dial("unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,8 +302,22 @@ func TestAServicesPeerIsTheWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if int(cred.Pid) != daemonPid {
-		t.Errorf("peer pid %d, the window's %d", cred.Pid, daemonPid)
+	return int(cred.Pid)
+}
+
+// The user's socket answers --show.
+func serves(t *testing.T, sock string) {
+	t.Helper()
+	p := post(t, sock, `{"galley":3,"show":true}`)
+	p.answer(t, `{"shown":true}`)
+}
+
+// A service connecting finds the window itself at the other end, as frisket
+// checks, not whatever made the socket.
+func TestAServicesPeerIsTheWindow(t *testing.T) {
+	need(t)
+	if pid := peerPid(t, filepath.Join(runtimeDir, "services")); pid != daemonPid {
+		t.Errorf("peer pid %d, the window's %d", pid, daemonPid)
 	}
 }
 
@@ -326,8 +350,32 @@ func TestBrokenServicesLeaveTheUsersSocket(t *testing.T) {
 		hungUp(t, post(t, path, serviceQuestion("normal", "x")))
 	})
 	t.Run("a services socket that cannot be bound", func(t *testing.T) {
-		serves(t, second(t, "", "GALLEY_SERVICES_SOCKET="+filepath.Join(runtimeDir, "nowhere", "services"),
-			fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username)))
+		sock := second(t, "", "GALLEY_SERVICES_SOCKET="+filepath.Join(runtimeDir, "nowhere", "services"),
+			fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
+		serves(t, sock)
+		logged(t, sock, "cannot listen on")
+	})
+	t.Run("a services socket too long to bind", func(t *testing.T) {
+		dir, err := os.MkdirTemp(runtimeDir, "l")
+		if err != nil {
+			t.Fatal(err)
+		}
+		sock := second(t, "", "GALLEY_SERVICES_SOCKET="+filepath.Join(dir, strings.Repeat("x", 120)),
+			fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
+		serves(t, sock)
+		logged(t, sock, "longer than a unix socket address holds")
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Errorf("bound %v", entries)
+		}
+	})
+	t.Run("a services socket another window listens on", func(t *testing.T) {
+		path := filepath.Join(runtimeDir, "services")
+		sock := second(t, "", "GALLEY_SERVICES_SOCKET="+path, fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
+		serves(t, sock)
+		logged(t, sock, "another window is already listening")
+		if pid := peerPid(t, path); pid != daemonPid {
+			t.Errorf("peer pid %d, the window's %d", pid, daemonPid)
+		}
 	})
 	t.Run("GALLEY_SERVICES with no services socket", func(t *testing.T) {
 		serves(t, second(t, "", fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username)))
