@@ -331,3 +331,52 @@ func TestAServiceNotificationGoesWithItsConnection(t *testing.T) {
 	n.conn.Close()
 	waitFor(t, "the listening notification to go", items(0))
 }
+
+// The window takes the user's socket from systemd by its name, in either
+// order beside the services socket, or as the one fd passed whatever its
+// name, rather than binding the path systemd holds.
+func TestTheUsersSocketFromSystemd(t *testing.T) {
+	need(t)
+	me, _ := user.Current()
+	for _, names := range []string{"user:services", "services:user", "", "galley.socket"} {
+		t.Run(names, func(t *testing.T) {
+			dir, err := os.MkdirTemp(runtimeDir, "a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			paths := map[string]string{}
+			var files []*os.File
+			for _, name := range strings.Split(names, ":") {
+				path := filepath.Join(dir, fmt.Sprint(len(files)))
+				f, err := listening(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer f.Close()
+				if name != "services" {
+					name = "user"
+				}
+				paths[name] = path
+				files = append(files, f)
+			}
+			d := activated(names, files, "GALLEY_SOCKET="+paths["user"], fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
+			if err := d.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				d.Process.Kill()
+				d.Wait()
+			})
+			for _, f := range files {
+				f.Close()
+			}
+			serves(t, paths["user"])
+			if path, ok := paths["services"]; ok {
+				p := post(t, path, `{"galley":3,"show":true}`)
+				if line, _ := p.r.ReadString('\n'); !strings.Contains(line, "error") {
+					t.Errorf("services reply = %q", line)
+				}
+			}
+		})
+	}
+}

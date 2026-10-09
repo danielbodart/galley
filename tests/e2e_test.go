@@ -125,9 +125,15 @@ func listening(path string) (*os.File, error) {
 // withServices is the window as systemd starts it with its services socket
 // passed: fd 3, named services, in LISTEN_FDS for its own pid.
 func withServices(services *os.File, env ...string) *exec.Cmd {
+	return activated("services", []*os.File{services}, env...)
+}
+
+// activated is the window as systemd starts it with files passed from fd 3
+// on, named as names, a colon-separated list, has them.
+func activated(names string, files []*os.File, env ...string) *exec.Cmd {
 	d := exec.Command("sh", append([]string{"-c", `export LISTEN_PID=$$; exec "$@"`, "sh"}, daemonArgs...)...)
-	d.Env = append(append(append([]string{}, daemonEnv...), "LISTEN_FDS=1", "LISTEN_FDNAMES=services"), env...)
-	d.ExtraFiles = []*os.File{services}
+	d.Env = append(append(append([]string{}, daemonEnv...), fmt.Sprintf("LISTEN_FDS=%d", len(files)), "LISTEN_FDNAMES="+names), env...)
+	d.ExtraFiles = files
 	d.Stdout, d.Stderr = os.Stderr, os.Stderr
 	return d
 }

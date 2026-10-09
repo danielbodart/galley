@@ -33,13 +33,16 @@ const VERSION = 3;
 const MAX_LINE = 100 * 1024 * 1024;
 
 // The sockets systemd passed this process, as a map of name to fd, taken
-// from the environment so that nothing this starts sees them as its own.
+// from the environment so that nothing this starts sees them as its own. A
+// lone fd not named services is the user's, whatever its name.
 export function passed() {
     const fds = new Map();
     const pid = new Gio.Credentials().get_unix_pid();
     if (GLib.getenv('LISTEN_PID') === String(pid)) {
         const names = (GLib.getenv('LISTEN_FDNAMES') ?? '').split(':');
         const n = Number(GLib.getenv('LISTEN_FDS'));
+        if (n === 1 && names[0] !== 'services')
+            names[0] = 'user';
         for (let i = 0; i < n; i++)
             fds.set(names[i], 3 + i);
     }

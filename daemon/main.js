@@ -99,6 +99,8 @@ function listenServices(fd) {
             printerr('galley: GALLEY_SERVICES is set, but systemd passed no services socket');
         return;
     }
+    if (!names)
+        printerr('galley: systemd passed a services socket, but GALLEY_SERVICES is not set, so it admits no one');
     let admit = new Map();
     try {
         const passwd = new TextDecoder().decode(GLib.file_get_contents('/etc/passwd')[1]);
