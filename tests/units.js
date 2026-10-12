@@ -10,12 +10,12 @@ import System from 'system';
 
 import {Queue, waited, sameness} from '../daemon/queue.js';
 import {render, lines, buttonMarkup} from '../daemon/render.js';
-import {validate, rows, progressUpdate, notify} from '../daemon/validate.js';
+import {validate, rows, progressUpdate, notify, MAX_DIFF_SIDE} from '../daemon/validate.js';
 import {formatDate} from '../daemon/dates.js';
 import {tint, symbolicName, css, levelIcon} from '../daemon/icons.js';
 import {admitted, fromService} from '../daemon/services.js';
 import {parseConfig, configArg, loadConfig, defaults} from '../daemon/config.js';
-import {isDiff, diffSpans, MAX_DIFF} from '../daemon/diff.js';
+import {isDiff, diffSpans, MAX_DIFF, unifiedDiff, editScript} from '../daemon/diff.js';
 import {label} from '../daemon/tray.js';
 
 let failed = 0;
@@ -442,6 +442,111 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     check('code points', [w.start, w.end], [Array.from(wide).length - 1, Array.from(wide).length]);
     // Lines with nothing in common are not marked within.
     check('unrelated', diffSpans('--- a\n+++ b\n@@ -1 +1 @@\n-abc\n+xyz').some(s => s.kind.endsWith('Word')), false);
+}
+
+// ---- the fifth protocol's items ---------------------------------------------
+
+{
+    const v5 = raw => validate(raw, 5);
+    const buttons = [{answer: 'cancel', label: 'Refuse'}, {answer: 'extra', index: 0, label: 'Allow once'}];
+    const d = {path: '~/Projects/foo/chase.json', old: '{}\n', new: '{"a": 1}\n'};
+    check('a diff', v5({kind: 'question', buttons, diff: d}).diff, d);
+    check('a new file', v5({kind: 'question', buttons, diff: {path: 'x', new: 'a\n'}}).diff,
+        {path: 'x', old: '', new: 'a\n'});
+    check('no diff', v5({kind: 'question', buttons}).diff, undefined);
+    check('a fourth-protocol diff is dropped', validate({kind: 'question', buttons, diff: d}, 4).diff, undefined);
+    const bad = (name, diff, pattern) => throws(name, () => v5({kind: 'question', buttons, diff}), pattern);
+    bad('a diff that is a list', [], /diff/);
+    bad('a diff with no path', {old: '', new: ''}, /no path/);
+    bad('a path over lines', {path: 'a\nb', new: ''}, /line break/);
+    bad('old not a string', {path: 'a', old: 1}, /diff old/);
+    bad('new too long', {path: 'a', new: 'x'.repeat(MAX_DIFF_SIDE + 1)}, /diff new is longer/);
+    check('a side at the most', v5({kind: 'question', buttons, diff: {path: 'a', old: 'x'.repeat(MAX_DIFF_SIDE)}})
+        .diff.old.length, MAX_DIFF_SIDE);
+
+    // Always is the window's button, after the item's, never the default.
+    const always = v5({kind: 'question', buttons, default: 1, always: true});
+    check('always', always.always, true);
+    check('always button', always.buttons[2], {answer: 'always', index: 0, label: 'Always', key: '', underline: -1,
+        disabled: false});
+    check('always is not the default', always.default, 1);
+    check('no always', v5({kind: 'question', buttons}).buttons.length, 2);
+    check('a fourth-protocol always is dropped', validate({kind: 'question', buttons, always: true}, 4).buttons.length, 2);
+    check('always must be true', v5({kind: 'question', buttons, always: 'yes'}).buttons.length, 2);
+    throws('a default on always', () => v5({kind: 'question', buttons, default: 2, always: true}), /default/);
+    throws('a poster\'s always button', () => v5({kind: 'question', buttons: [{answer: 'always', label: 'Sure'}]}),
+        /no answer galley knows/);
+    // Two items alike but for always, or their diffs, are not the same question.
+    check('always is part of sameness', sameness(always) === sameness(v5({kind: 'question', buttons, default: 1})),
+        false);
+}
+
+// ---- diffs worked out -----------------------------------------------------------
+
+{
+    const diff = (old, now) => unifiedDiff('chase.json', old, now).text;
+    check('a change', diff('{\n  "a": 1,\n  "b": 2\n}\n', '{\n  "a": 1,\n  "b": 3\n}\n'), [
+        '--- chase.json', '+++ chase.json', '@@ -1,4 +1,4 @@', ' {', '   "a": 1,', '-  "b": 2', '+  "b": 3', ' }',
+    ].join('\n'));
+    check('a new file', diff('', 'a\nb\n'), ['--- chase.json', '+++ chase.json', '@@ -0,0 +1,2 @@', '+a', '+b'].join('\n'));
+    check('a file emptied', diff('a\n', ''), ['--- chase.json', '+++ chase.json', '@@ -1 +0,0 @@', '-a'].join('\n'));
+    check('no change', diff('a\n', 'a\n'), ['--- chase.json', '+++ chase.json', 'No change.'].join('\n'));
+    check('a newline taken away', diff('a\n', 'a'), [
+        '--- chase.json', '+++ chase.json', '@@ -1 +1 @@', '-a', '+a', '\\ No newline at end of file',
+    ].join('\n'));
+
+    // Three lines of context; changes further apart than twice that are
+    // hunks of their own, as `diff -u` makes them.
+    const n = Array.from({length: 30}, (_, i) => `${i + 1}\n`);
+    const changed = n.map((l, i) => (i === 1 || i === 9 || i === 25 ? `x${l}` : l));
+    const heads = lines => diff(n.join(''), lines.join('')).split('\n').filter(l => l.startsWith('@@'));
+    check('hunks', heads(changed), ['@@ -1,5 +1,5 @@', '@@ -7,7 +7,7 @@', '@@ -23,7 +23,7 @@']);
+    check('hunks joined', heads(n.map((l, i) => (i === 1 || i === 8 ? `x${l}` : l))), ['@@ -1,12 +1,12 @@']);
+    const added = [...n.slice(0, 15), 'new\n', ...n.slice(15)];
+    check('an added line', diff(n.join(''), added.join('')).split('\n').slice(2),
+        ['@@ -13,6 +13,7 @@', ' 13', ' 14', ' 15', '+new', ' 16', ' 17', ' 18']);
+
+    // What is coloured: headers, the hunk's line, the lines added and
+    // removed, and within a line put in place of another, what changed.
+    const shown = unifiedDiff('p', 'keep\n"b": 2\n', 'keep\n"b": 3\n');
+    const at = kind => shown.spans.filter(s => s.kind === kind).map(s => shown.text.slice(s.start, s.end));
+    check('spans file', at('file'), ['--- p', '+++ p']);
+    check('spans hunk', at('hunk'), ['@@ -1,2 +1,2 @@']);
+    check('spans del', at('del'), ['-"b": 2']);
+    check('spans add', at('add'), ['+"b": 3']);
+    check('spans words', [at('delWord'), at('addWord')], [['2'], ['3']]);
+    check('counts', [shown.added, shown.removed], [1, 1]);
+    // A line that looks like a header is coloured as the line it is.
+    const tricky = unifiedDiff('p', '-- a\n', '++ b\n@@ -1 +1 @@\n');
+    check('header-like lines', tricky.spans.filter(s => s.kind === 'file').length, 2);
+
+    // Any edit script, applied, makes the new lines from the old.
+    let seed = 7;
+    const random = k => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed % k;
+    };
+    let wrong = 0;
+    for (let round = 0; round < 300; round++) {
+        const a = Array.from({length: random(20)}, () => 'abc'[random(3)]);
+        const b = Array.from({length: random(20)}, () => 'abc'[random(3)]);
+        const edits = editScript(a, b);
+        const made = edits.filter(e => e.op !== '-').map(e => (e.op === '+' ? b[e.j] : a[e.i]));
+        const kept = edits.filter(e => e.op !== '+').map(e => a[e.i]);
+        if (JSON.stringify(made) !== JSON.stringify(b) || JSON.stringify(kept) !== JSON.stringify(a) ||
+            edits.some(e => e.op === ' ' && a[e.i] !== b[e.j]))
+            wrong++;
+    }
+    check('edit scripts', wrong, 0);
+    // The fewest changes: one line changed in a thousand is one removed and one added.
+    const big = Array.from({length: 1000}, (_, i) => `${i}`);
+    const one = big.map((l, i) => (i === 500 ? 'x' : l));
+    check('fewest', editScript(big, one).filter(e => e.op !== ' ').length, 2);
+    // Past the budget, still the change, if not the shortest showing of it.
+    const many = Array.from({length: 20000}, (_, i) => `${i % 7}\n`).join('');
+    const other = Array.from({length: 20000}, (_, i) => `${(i * 3) % 11}\n`).join('');
+    const huge = unifiedDiff('p', many, other);
+    check('over budget', [huge.removed, huge.added], [19999, 19999]);
 }
 
 // ---- the tray ------------------------------------------------------------

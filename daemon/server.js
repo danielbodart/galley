@@ -25,7 +25,7 @@ Gio._promisify(Gio.DataInputStream.prototype, 'read_line_async', 'read_line_fini
 // The protocol versions this window takes (wire): any from the
 // first to its own, so a client older than the window still reaches it.
 const MIN_VERSION = 1;
-const VERSION = 4;
+const VERSION = 5;
 
 // The longest line a client may send: a text-info's whole file arrives in
 // its first, and the client caps that at 16 MiB of text, which JSON's

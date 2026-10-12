@@ -213,6 +213,13 @@ type state struct {
 			Height  int  `json:"height"`
 			Scrolls bool `json:"scrolls"`
 		} `json:"table"`
+		Diff *struct {
+			Text    string `json:"text"`
+			Added   int    `json:"added"`
+			Removed int    `json:"removed"`
+			Height  int    `json:"height"`
+			Scrolls bool   `json:"scrolls"`
+		} `json:"diff"`
 		InView *bool `json:"inView"`
 	} `json:"items"`
 }

@@ -64,6 +64,18 @@ var goldens = map[string]any{
 		Buttons: []Button{refuse("Refuse"), extra("Allow")},
 		Default: -1,
 	}},
+	"signer-always.json": &Hello{Galley: 5, Item: &Item{
+		Kind: KindForms, Level: LevelNormal, Title: "ssh to github.com",
+		Text:    "claude (pid 5113) ← bash ← git push ← ssh\nAlways allows github.com from ~/Projects/foo, signed into its chase.json.",
+		Buttons: []Button{refuse("Refuse"), extra("Allow once"), allow("Allow for")},
+		Default: -1,
+		Forms:   &Forms{Fields: []Field{{Kind: FieldEntry, Label: "Allow for", Text: "15"}, units}},
+		Diff: &Diff{Path: "~/Projects/foo/chase.json",
+			Old: "{\n  \"signer\": {}\n}\n",
+			New: "{\n  \"signer\": {\n    \"ssh\": {\n      \"github.com\": \"allow\"\n    }\n  }\n}\n"},
+		Always: true,
+	}},
+	"answer-always.json":           &Answer{Answer: AnswerAlways},
 	"answer-extra.json":            &Answer{Answer: AnswerExtra, Index: 0},
 	"answer-allow-for.json":        &Answer{Answer: AnswerOK, Fields: []FieldValue{text("15"), text("minutes")}},
 	"answer-sudo-dialog.json":      &Answer{Answer: AnswerOK, Fields: []FieldValue{text("hunter2"), text("15"), text("minutes")}},
@@ -116,8 +128,8 @@ func TestGoldens(t *testing.T) {
 				if !bytes.Equal(append(written, '\n'), data) {
 					t.Errorf("written as\n%s", written)
 				}
-				if n := Needs(hello.Item); n != 3 {
-					t.Errorf("needs %d, want 3", n)
+				if n := Needs(hello.Item); n != hello.Galley {
+					t.Errorf("needs %d, want %d", n, hello.Galley)
 				}
 			}
 		})
@@ -135,6 +147,8 @@ func TestNeeds(t *testing.T) {
 		{"a level", Item{Kind: KindQuestion, Level: LevelNormal}, 3},
 		{"a field's text", Item{Kind: KindForms, Forms: &Forms{Fields: []Field{{Kind: FieldEntry, Text: "15"}}}}, 3},
 		{"a table", Item{Kind: KindQuestion, Level: LevelNormal, Table: &Table{Columns: []string{"pid"}}}, 4},
+		{"a diff", Item{Kind: KindQuestion, Level: LevelNormal, Diff: &Diff{Path: "chase.json"}}, 5},
+		{"always", Item{Kind: KindQuestion, Always: true}, 5},
 	} {
 		if got := Needs(&c.item); got != c.want {
 			t.Errorf("%s needs %d, want %d", c.name, got, c.want)

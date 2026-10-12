@@ -48,7 +48,7 @@ import Adw from 'gi://Adw?version=1';
 
 import {Queue, waited, sameness, streams} from './queue.js';
 import {render, lines, buttonMarkup} from './render.js';
-import {makeBody, chooseFiles, readTable} from './bodies.js';
+import {makeBody, chooseFiles, readTable, readDiff} from './bodies.js';
 import {tint, symbolicName, css} from './icons.js';
 
 // What takes typed text, where letters are not keys.
@@ -482,12 +482,24 @@ export class QueueWindow {
             page.append(record.table.widget);
         }
 
+        if (item.diff) {
+            textScroller.vexpand = false;
+            // The diff is what is answered: a table beside it keeps to a
+            // few rows' height and leaves it the rest.
+            if (record.table) {
+                record.table.widget.vexpand = false;
+                record.table.widget.max_content_height = 130;
+            }
+            record.diff = readDiff(item.diff);
+            page.append(record.diff.widget);
+        }
+
         if (body.widget) {
             page.append(body.widget);
             if (!body.expands)
                 page.append(new Gtk.Box({vexpand: true}));
         }
-        record.scroller = body.scroller ?? textScroller;
+        record.scroller = body.scroller ?? record.diff?.scroller ?? textScroller;
 
         const buttons = new Gtk.Box({spacing: 8, halign: Gtk.Align.END});
         record.buttons = item.buttons.map((spec, i) => {
@@ -799,7 +811,11 @@ export class QueueWindow {
             return;
         const [w, h] = this.window.get_default_size();
         const width = item.width > 0 ? Math.min(item.width + 300, 2400) : 0;
-        const height = item.height > 0 ? Math.min(item.height + 120, 1600) : 0;
+        let height = item.height > 0 ? Math.min(item.height + 120, 1600) : 0;
+        // A diff is read line by line: room for a hunk or two beside the
+        // text, a table and the fields.
+        if (item.diff)
+            height = Math.max(height, 720);
         this.window.set_default_size(Math.max(w, width), Math.max(h, height));
     }
 
@@ -856,6 +872,7 @@ export class QueueWindow {
                 body: r.body.state?.(),
                 row: [r.rowFirst.get_text(), r.rowSecond.visible ? r.rowSecond.get_text() : ''],
                 table: r.table?.state(),
+                diff: r.diff?.state(),
                 // Whether each of the page's fields and buttons lies wholly
                 // inside the window, as drawn.
                 inView: r === current ? inView(this.window, r) : undefined,

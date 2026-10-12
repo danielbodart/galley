@@ -24,8 +24,8 @@
 // the fields they need, and the lines that go with them: Follow's Rows,
 // Progress and Notify, and Answer's Partial and Queued. Version 3 adds an
 // item's Level, a form field's Text and the Caller the window sets.
-// Version 4 adds an item's Table. Each
-// version's lines are the earlier one's with fields added, never changed. A
+// Version 4 adds an item's Table. Version 5 adds an item's Diff and Always,
+// and the answer AnswerAlways. Each version's lines are the earlier one's with fields added, never changed. A
 // client sends the lowest version its item needs (Needs), so an item that
 // version 1 could carry still reaches a window started before version 2 --
 // the window is long-running, and outlives the client package it came with
@@ -35,7 +35,7 @@ package wire
 // Version is the newest the window speaks. MinVersion is the oldest it
 // still takes: it refuses anything outside them rather than guessing.
 const (
-	Version    = 4
+	Version    = 5
 	MinVersion = 1
 )
 
@@ -122,6 +122,30 @@ type Item struct {
 	// Table is read-only rows shown under the text, before the item's own
 	// body: details to read, such as the processes that asked.
 	Table *Table `json:"table,omitempty"`
+
+	// Version 5.
+
+	// Diff is a change to a file, shown under the text and the table as a
+	// unified diff the window works out itself from Old and New, so what
+	// is shown is the change itself, whatever the text says of it.
+	Diff *Diff `json:"diff,omitempty"`
+	// Always adds a button of the window's own, labelled "Always", after
+	// the item's buttons: never the default, never pressed by Enter unless
+	// Tab has reached it, and answered AnswerAlways.
+	Always bool `json:"always,omitempty"`
+}
+
+// MaxDiff is the most each side of a Diff may hold, in UTF-16 code units
+// (as JavaScript counts a string): the window refuses an item beyond it.
+const MaxDiff = 256 << 10
+
+// Diff is a file's contents before and after: Old empty for a file that
+// is new, every line of New then an addition.
+type Diff struct {
+	// Path is the file's, as the diff's headers name it. At most 4096.
+	Path string `json:"path"`
+	Old  string `json:"old"`
+	New  string `json:"new"`
 }
 
 // Table is rows to read: nothing in it is chosen, sorted or answered. A
@@ -157,6 +181,7 @@ type Caller struct {
 type Button struct {
 	// Answer is what pressing it answers: AnswerOK, AnswerCancel,
 	// AnswerClose or AnswerExtra, with Index naming which extra button.
+	// Never AnswerAlways: that button is the window's, from Item.Always.
 	Answer string `json:"answer"`
 	Index  int    `json:"index,omitempty"`
 	// Label is the text shown, its mnemonic underscores already removed.
@@ -369,6 +394,8 @@ const (
 	AnswerTimeout = "timeout"
 	// AnswerClose is zenity's Escape: the dialog closed with no button.
 	AnswerClose = "close"
+	// AnswerAlways is an item's Always button. Version 5.
+	AnswerAlways = "always"
 )
 
 // Answer is the window's last line to an item's client, and in version 2
@@ -415,9 +442,12 @@ type FieldValue struct {
 }
 
 // Needs is the lowest version that carries item: 1 for what the first
-// window showed, 4 for a table, 3 for a level or a field's text, 2 for
-// anything else.
+// window showed, 5 for a diff or Always, 4 for a table, 3 for a level or
+// a field's text, 2 for anything else.
 func Needs(item *Item) int {
+	if item.Diff != nil || item.Always {
+		return 5
+	}
 	if item.Table != nil {
 		return 4
 	}

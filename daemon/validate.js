@@ -15,7 +15,8 @@
 const KINDS_1 = ['question', 'info', 'warning', 'error', 'entry', 'text'];
 const KINDS_2 = [...KINDS_1, 'list', 'forms', 'calendar', 'scale', 'password', 'color',
     'file', 'progress', 'notification', 'about'];
-const KINDS = {1: new Set(KINDS_1), 2: new Set(KINDS_2), 3: new Set(KINDS_2), 4: new Set(KINDS_2)};
+const KINDS = {1: new Set(KINDS_1), 2: new Set(KINDS_2), 3: new Set(KINDS_2), 4: new Set(KINDS_2),
+    5: new Set(KINDS_2)};
 const LEVELS = new Set(['normal', 'warning', 'danger']);
 const ANSWERS = new Set(['ok', 'cancel', 'extra', 'close']);
 const FIELDS = new Set(['entry', 'password', 'multiline', 'calendar', 'list', 'combo']);
@@ -281,7 +282,37 @@ export function validate(raw, version = 1) {
     }
     if (version >= 4 && raw.table !== undefined && raw.table !== null)
         item.table = table(raw.table);
+    if (version >= 5 && raw.diff !== undefined && raw.diff !== null)
+        item.diff = diff(raw.diff);
+    // Always is the window's own button, after the item's, its label the
+    // window's, never the default: the item's default was read against the
+    // item's buttons alone.
+    if (version >= 5 && bool(raw.always)) {
+        item.always = true;
+        buttons.push({answer: 'always', index: 0, label: 'Always', key: '', underline: -1, disabled: false});
+    }
     return item;
+}
+
+// The most each side of a diff may hold, in UTF-16 code units: a policy
+// file is small, and a change much bigger is not one to read in a dialog.
+export const MAX_DIFF_SIDE = 256 << 10;
+
+// An item's diff: the file's path, and its text before and after, from
+// which the window works the diff out itself.
+function diff(raw) {
+    if (typeof raw !== 'object' || Array.isArray(raw))
+        throw new Error('diff is not an object');
+    const path = string(raw.path, 'diff path', 4096);
+    if (!path)
+        throw new Error('diff has no path');
+    if (/[\n\r]/.test(path))
+        throw new Error('diff path has a line break');
+    return {
+        path,
+        old: string(raw.old, 'diff old', MAX_DIFF_SIDE),
+        new: string(raw.new, 'diff new', MAX_DIFF_SIDE),
+    };
 }
 
 // How much a read-only table may hold: it is read, not searched.

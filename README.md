@@ -368,6 +368,14 @@ started before the rest.
   puts the process chain there, a process a row -- which takes the height
   left over and scrolls, so the fields and buttons below it stay in sight;
   its `summary` is what the item's row in the queue shows under its title.
+  In version 5 an item may carry a `diff` -- a file's `path`, its `old`
+  text and its `new`, each at most 256 KiB -- which the window works out
+  and shows as a unified diff itself, coloured and scrolling as the table
+  does, so what is shown as changing is the change, whatever the text
+  says; and `always`, which adds the window's own button labelled Always
+  after the item's, never the default and pressed by Enter only once Tab
+  has reached it, answered `always`. frisket's signer offers these to sign
+  a rule into a project's policy file.
   An item a client sends with a `caller` is refused. Settings that cannot
   be read are logged and the defaults used -- no service admitted, the
   accessibility bus off -- and a services socket that cannot be set up is

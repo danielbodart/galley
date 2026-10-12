@@ -28,7 +28,7 @@ import Gtk from 'gi://Gtk?version=4.0';
 
 import {MAX_ROWS} from './validate.js';
 import {formatDate} from './dates.js';
-import {isDiff, diffSpans} from './diff.js';
+import {isDiff, diffSpans, unifiedDiff} from './diff.js';
 
 export function makeBody(item, ctx) {
     const make = kinds[item.kind];
@@ -465,6 +465,63 @@ export function readTable(spec) {
             const v = scroller.get_vadjustment();
             return {
                 rows: spec.rows.length,
+                height: scroller.get_height(),
+                scrolls: v.get_upper() > v.get_page_size() + 1,
+            };
+        },
+    };
+}
+
+// An item's diff, under its text and its table: the change from the old
+// text to the new, worked out here and shown as a unified diff, coloured as
+// a --text-info's diff is, set in monospace and never wrapped, so each
+// line's mark stays at its start. The poster says what the file was and is;
+// what changed is the window's to say.
+//
+// Like the table, it takes the height left once the fields and buttons have
+// theirs, up to what its lines need, and scrolls beyond that.
+export function readDiff(spec) {
+    const diff = unifiedDiff(spec.path, spec.old, spec.new);
+    const view = new Gtk.TextView({
+        editable: false, cursor_visible: false, monospace: true, wrap_mode: Gtk.WrapMode.NONE,
+        top_margin: 6, bottom_margin: 6, left_margin: 6, right_margin: 6,
+    });
+    const buffer = view.buffer;
+    buffer.set_text(diff.text, -1);
+    const tags = {};
+    for (const [kind, props] of Object.entries(diffTags)) {
+        tags[kind] = new Gtk.TextTag({name: `diff-${kind}`, ...props});
+        buffer.tag_table.add(tags[kind]);
+    }
+    for (const {kind, start, end} of diff.spans)
+        buffer.apply_tag(tags[kind], buffer.get_iter_at_offset(start), buffer.get_iter_at_offset(end));
+    // Once drawn, the first line changed is brought to the middle, so a
+    // diff taller than its share opens on the change, not on what stayed.
+    const first = diff.spans.find(sp => sp.kind === 'add' || sp.kind === 'del');
+    if (first) {
+        const mark = buffer.create_mark(null, buffer.get_iter_at_offset(first.start), true);
+        view.connect('map', () => GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            view.scroll_to_mark(mark, 0, true, 0, 0.5);
+            return GLib.SOURCE_REMOVE;
+        }));
+    }
+    const scroller = new Gtk.ScrolledWindow({
+        child: view, hexpand: true, vexpand: true, valign: Gtk.Align.START,
+        propagate_natural_height: true,
+        hscrollbar_policy: Gtk.PolicyType.AUTOMATIC, vscrollbar_policy: Gtk.PolicyType.AUTOMATIC,
+        css_classes: ['card'],
+    });
+    return {
+        widget: scroller,
+        scroller,
+        // What the end-to-end check reads: the diff's text, its counts, the
+        // height drawn, and whether its lines are more than it shows.
+        state: () => {
+            const v = scroller.get_vadjustment();
+            return {
+                text: diff.text,
+                added: diff.added,
+                removed: diff.removed,
                 height: scroller.get_height(),
                 scrolls: v.get_upper() > v.get_page_size() + 1,
             };

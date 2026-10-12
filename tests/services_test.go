@@ -562,3 +562,83 @@ func TestATableScrollsAndLeavesTheFieldsInView(t *testing.T) {
 	short.conn.Close()
 	waitFor(t, "the short table to go", items(0))
 }
+
+// alwaysDialog is the signer's form with Always and a diff, its default
+// the button at index def, or -1 for none.
+func alwaysDialog(t *testing.T, def int, diff map[string]string) string {
+	t.Helper()
+	var hello map[string]any
+	if err := json.Unmarshal([]byte(golden(t, "signer-always.json")), &hello); err != nil {
+		t.Fatal(err)
+	}
+	item := hello["item"].(map[string]any)
+	item["default"] = def
+	if diff != nil {
+		item["diff"] = diff
+	}
+	b, _ := json.Marshal(hello)
+	return string(b)
+}
+
+// The signer's Always: the window works the diff out from the file's two
+// versions and shows it, and adds its own Always button after the item's,
+// which Enter never presses unless Tab has reached it, and which answers
+// "always".
+func TestAlwaysShowsTheDiffAndIsNeverEnter(t *testing.T) {
+	need(t)
+	start(t, "", "--show").expect(t, 0, "")
+	p := postService(t, golden(t, "signer-always.json"))
+	s := waitFor(t, "the dialog", items(1))
+	it := s.Items[0]
+	want := strings.Join([]string{
+		"--- ~/Projects/foo/chase.json", "+++ ~/Projects/foo/chase.json", "@@ -1,3 +1,7 @@", " {",
+		`-  "signer": {}`, `+  "signer": {`, `+    "ssh": {`, `+      "github.com": "allow"`, "+    }", "+  }", " }",
+	}, "\n")
+	if it.Diff == nil || it.Diff.Text != want || it.Diff.Added != 5 || it.Diff.Removed != 1 {
+		t.Errorf("diff = %+v", it.Diff)
+	}
+	if n := len(it.Buttons); n != 4 || it.Buttons[3].Label != "Always" || !it.Buttons[3].Enabled || it.Default != -1 {
+		t.Errorf("buttons = %+v, default %d", it.Buttons, it.Default)
+	}
+	press(t, "Return")
+	if s := current(t); len(s.Items) != 1 {
+		t.Fatalf("Enter answered: %+v", s.Items)
+	}
+	focus(t, "Always")
+	press(t, "Return")
+	p.answer(t, golden(t, "answer-always.json"))
+	waitFor(t, "the dialog to go", items(0))
+
+	// With a default, Enter presses it, never Always.
+	p = postService(t, alwaysDialog(t, 1, nil))
+	waitFor(t, "the dialog with a default", items(1))
+	press(t, "Return")
+	p.answer(t, golden(t, "answer-extra.json"))
+}
+
+// A long diff scrolls in the height the window has left, the fields and
+// buttons still in sight; a new file's is every line added.
+func TestALongDiffScrollsAndLeavesTheFieldsInView(t *testing.T) {
+	need(t)
+	var lines []string
+	for i := range 300 {
+		lines = append(lines, fmt.Sprintf(`  "rule-%d": "allow",`, i))
+	}
+	p := postService(t, alwaysDialog(t, -1, map[string]string{
+		"path": "chase.json", "new": "{\n" + strings.Join(lines, "\n") + "\n}\n"}))
+	waitFor(t, "the long diff", items(1))
+	start(t, "", "--show").expect(t, 0, "")
+	s := waitFor(t, "the long diff", func(s state) bool {
+		return s.Visible && len(s.Items) == 1 && s.Items[0].Diff != nil && s.Items[0].Diff.Height > 0 && s.Items[0].InView != nil
+	})
+	it := s.Items[0]
+	if it.Diff.Added != 302 || it.Diff.Removed != 0 || !strings.Contains(it.Diff.Text, "@@ -0,0 +1,302 @@") {
+		t.Errorf("new file's diff: %d added, %d removed", it.Diff.Added, it.Diff.Removed)
+	}
+	if !it.Diff.Scrolls || !*it.InView {
+		t.Errorf("long diff: scrolls %v, height %d, in view %v", it.Diff.Scrolls, it.Diff.Height, *it.InView)
+	}
+	focus(t, "Always")
+	press(t, "Return")
+	p.answer(t, golden(t, "answer-always.json"))
+}
