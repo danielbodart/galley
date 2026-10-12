@@ -223,6 +223,27 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     }
 }
 
+// ---- the fourth protocol's items -------------------------------------------
+
+{
+    const v4 = raw => validate(raw, 4);
+    const t = {columns: ['pid', 'process'], rows: [['5113', 'claude'], ['', 'bash -c\n    make']], monospace: [1],
+        summary: 'claude ← bash -c'};
+    check('a table', v4({kind: 'question', buttons: [], table: t}).table, t);
+    check('no table', v4({kind: 'question', buttons: []}).table, undefined);
+    check('a third-protocol table is dropped', validate({kind: 'question', buttons: [], table: t}, 3).table,
+        undefined);
+    check('a table with no monospace', v4({kind: 'question', buttons: [], table: {columns: ['a'], rows: []}}).table,
+        {columns: ['a'], rows: [], monospace: [], summary: ''});
+    const bad = (name, table, pattern) => throws(name, () => v4({kind: 'question', buttons: [], table}), pattern);
+    bad('a table that is a list', [], /table/);
+    bad('a table with no columns', {columns: [], rows: []}, /no columns/);
+    bad('a row wider than the columns', {columns: ['a'], rows: [['x', 'y']]}, /table rows/);
+    bad('a summary that is not a string', {columns: ['a'], rows: [], summary: 1}, /summary/);
+    bad('a monospace column that is not there', {columns: ['a'], rows: [], monospace: [1]}, /monospace/);
+    bad('too many rows', {columns: ['a'], rows: Array.from({length: 65}, () => ['x'])}, /table rows/);
+}
+
 // ---- the same question -------------------------------------------------------
 
 {

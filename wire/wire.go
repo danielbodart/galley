@@ -23,7 +23,8 @@
 // --entry and --text-info, read-only. Version 2 adds every other dialog,
 // the fields they need, and the lines that go with them: Follow's Rows,
 // Progress and Notify, and Answer's Partial and Queued. Version 3 adds an
-// item's Level, a form field's Text and the Caller the window sets. Each
+// item's Level, a form field's Text and the Caller the window sets.
+// Version 4 adds an item's Table. Each
 // version's lines are the earlier one's with fields added, never changed. A
 // client sends the lowest version its item needs (Needs), so an item that
 // version 1 could carry still reaches a window started before version 2 --
@@ -34,7 +35,7 @@ package wire
 // Version is the newest the window speaks. MinVersion is the oldest it
 // still takes: it refuses anything outside them rather than guessing.
 const (
-	Version    = 3
+	Version    = 4
 	MinVersion = 1
 )
 
@@ -115,6 +116,26 @@ type Item struct {
 	// Caller is set by the window from the connection's peer. A client
 	// that sends one is refused.
 	Caller *Caller `json:"caller,omitempty"`
+
+	// Version 4.
+
+	// Table is read-only rows shown under the text, before the item's own
+	// body: details to read, such as the processes that asked.
+	Table *Table `json:"table,omitempty"`
+}
+
+// Table is rows to read: nothing in it is chosen, sorted or answered. A
+// cell may hold several lines.
+type Table struct {
+	Columns []string   `json:"columns"`
+	Rows    [][]string `json:"rows"`
+	// Monospace are the columns set in a fixed-width font, counted from 0,
+	// for text laid out by characters, such as commands.
+	Monospace []int `json:"monospace,omitempty"`
+	// Summary is the line the queue's row shows under the item's title, in
+	// place of the text's first two lines: what the rows come to, such as
+	// who asked and what ran.
+	Summary string `json:"summary,omitempty"`
 }
 
 // An item's levels.
@@ -394,8 +415,12 @@ type FieldValue struct {
 }
 
 // Needs is the lowest version that carries item: 1 for what the first
-// window showed, 3 for a level or a field's text, 2 for anything else.
+// window showed, 4 for a table, 3 for a level or a field's text, 2 for
+// anything else.
 func Needs(item *Item) int {
+	if item.Table != nil {
+		return 4
+	}
 	if item.Level != "" {
 		return 3
 	}

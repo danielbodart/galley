@@ -15,7 +15,7 @@
 const KINDS_1 = ['question', 'info', 'warning', 'error', 'entry', 'text'];
 const KINDS_2 = [...KINDS_1, 'list', 'forms', 'calendar', 'scale', 'password', 'color',
     'file', 'progress', 'notification', 'about'];
-const KINDS = {1: new Set(KINDS_1), 2: new Set(KINDS_2), 3: new Set(KINDS_2)};
+const KINDS = {1: new Set(KINDS_1), 2: new Set(KINDS_2), 3: new Set(KINDS_2), 4: new Set(KINDS_2)};
 const LEVELS = new Set(['normal', 'warning', 'danger']);
 const ANSWERS = new Set(['ok', 'cancel', 'extra', 'close']);
 const FIELDS = new Set(['entry', 'password', 'multiline', 'calendar', 'list', 'combo']);
@@ -279,7 +279,30 @@ export function validate(raw, version = 1) {
         item.note = {listen: bool(part('note').listen)};
         break;
     }
+    if (version >= 4 && raw.table !== undefined && raw.table !== null)
+        item.table = table(raw.table);
     return item;
+}
+
+// How much a read-only table may hold: it is read, not searched.
+const MAX_TABLE_ROWS = 64;
+const MAX_TABLE_COLUMNS = 8;
+
+// An item's read-only table: its columns, its rows, which columns are
+// monospace, and the line its queue row shows.
+function table(raw) {
+    if (typeof raw !== 'object' || Array.isArray(raw))
+        throw new Error('table is not an object');
+    const columns = strings(raw.columns, 'table columns', MAX_TABLE_COLUMNS, 256);
+    if (columns.length === 0)
+        throw new Error('table has no columns');
+    return {
+        columns,
+        rows: rows(raw.rows, 'table rows', columns.length, MAX_TABLE_ROWS),
+        monospace: list(raw.monospace, 'table monospace', columns.length,
+            (v, n) => int(v, n, 0, columns.length - 1)),
+        summary: string(raw.summary, 'table summary', 1024),
+    };
 }
 
 // A progress item's update, read as an item is.

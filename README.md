@@ -363,8 +363,12 @@ started before the rest.
   A service's item is shown under its label, never as markup, with
   galley's icon for its `level` -- normal, warning or danger, which also
   has a banner -- is never shared with another row, and goes when its
-  service hangs up, a notification included. An item a client sends with
-  a `caller` is refused. A services socket or `$GALLEY_SERVICES` that
+  service hangs up, a notification included. An item may carry a
+  read-only `table` (protocol version 4), shown under its text -- frisket
+  puts the process chain there, a process a row -- which takes the height
+  left over and scrolls, so the fields and buttons below it stay in sight;
+  its `summary` is what the item's row in the queue shows under its title.
+  An item a client sends with a `caller` is refused. A services socket or `$GALLEY_SERVICES` that
   cannot be set up is logged, and the window serves its user as before.
 - **The test control is not shipped.** The end-to-end check presses keys
   through `daemon/test-control.js`; the package leaves that file out.

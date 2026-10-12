@@ -188,6 +188,13 @@ type state struct {
 		Askers    int             `json:"askers"`
 		Badge     string          `json:"badge"`
 		Body      json.RawMessage `json:"body"`
+		Row       []string        `json:"row"`
+		Table     *struct {
+			Rows    int  `json:"rows"`
+			Height  int  `json:"height"`
+			Scrolls bool `json:"scrolls"`
+		} `json:"table"`
+		InView *bool `json:"inView"`
 	} `json:"items"`
 }
 

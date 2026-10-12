@@ -419,6 +419,59 @@ function makeTable({columns, type = '', multiple = false, editable = false,
     };
 }
 
+// An item's read-only table, under its text: rows to read, in the order
+// given, a column each, headed, nothing chosen and nothing sorted; a
+// cell's lines kept as sent. A grid of labels rather than the list's
+// view: the list's estimates the height of rows it has not drawn, which
+// leaves a short table taller than its rows.
+//
+// It is the page's give: it takes what height is left once the text, the
+// fields and the buttons have theirs, up to what its rows need, and
+// scrolls beyond that, so a long table never pushes the fields or the
+// buttons out of the window. A short one is only as tall as its rows.
+export function readTable(spec) {
+    const grid = new Gtk.Grid({
+        column_spacing: 18, row_spacing: 6,
+        margin_top: 8, margin_bottom: 10, margin_start: 10, margin_end: 10,
+    });
+    spec.columns.forEach((title, c) => {
+        grid.attach(new Gtk.Label({
+            label: title, xalign: 0, use_markup: false, use_underline: false,
+            css_classes: ['caption-heading', 'dim-label'],
+        }), c, 0, 1, 1);
+    });
+    spec.rows.forEach((row, r) => {
+        spec.columns.forEach((_, c) => {
+            const label = new Gtk.Label({
+                label: row[c] ?? '', xalign: 0, yalign: 0, use_markup: false, use_underline: false,
+                selectable: false, hexpand: c === spec.columns.length - 1,
+            });
+            if (spec.monospace.includes(c))
+                label.add_css_class('monospace');
+            grid.attach(label, c, r + 1, 1, 1);
+        });
+    });
+    const scroller = new Gtk.ScrolledWindow({
+        child: grid, hexpand: true, vexpand: true, valign: Gtk.Align.START,
+        propagate_natural_height: true,
+        hscrollbar_policy: Gtk.PolicyType.AUTOMATIC, vscrollbar_policy: Gtk.PolicyType.AUTOMATIC,
+        css_classes: ['card'],
+    });
+    return {
+        widget: scroller,
+        // What the end-to-end check reads: the rows, the height drawn, and
+        // whether the rows are more than the table shows.
+        state: () => {
+            const v = scroller.get_vadjustment();
+            return {
+                rows: spec.rows.length,
+                height: scroller.get_height(),
+                scrolls: v.get_upper() > v.get_page_size() + 1,
+            };
+        },
+    };
+}
+
 function listBody(item, ctx) {
     const l = item.list;
     const table = makeTable({

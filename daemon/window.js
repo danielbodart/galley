@@ -48,7 +48,7 @@ import Adw from 'gi://Adw?version=1';
 
 import {Queue, waited, sameness, streams} from './queue.js';
 import {render, lines, buttonMarkup} from './render.js';
-import {makeBody, chooseFiles} from './bodies.js';
+import {makeBody, chooseFiles, readTable} from './bodies.js';
 import {tint, symbolicName, css} from './icons.js';
 
 // What takes typed text, where letters are not keys.
@@ -418,13 +418,16 @@ export class QueueWindow {
     }
 
     // A row's first two lines of text, which for frisket's asker are the
-    // workspace and what the request does.
+    // workspace and what the request does; or, for an item whose table has
+    // a summary, its title and that summary.
     _rowText(record) {
         const {item} = record;
         const shown = item.kind === 'text'
             ? item.info.text ?? ''
             : render(item.text ?? '', item.markup).text;
-        const [first, second] = lines(shown, 2);
+        let [first, second] = lines(shown, 2);
+        if (item.table?.summary)
+            [first, second] = [item.title, item.table.summary];
         record.rowFirst.set_text(first || item.title || 'Untitled');
         record.rowSecond.set_text(second ?? '');
         record.rowFirst.tooltip_text = first || null;
@@ -472,6 +475,12 @@ export class QueueWindow {
         page.append(textScroller);
         record.textScroller = textScroller;
         this._setText(record, item.text ?? '', item.markup);
+
+        if (item.table) {
+            textScroller.vexpand = false;
+            record.table = readTable(item.table);
+            page.append(record.table.widget);
+        }
 
         if (body.widget) {
             page.append(body.widget);
@@ -845,6 +854,11 @@ export class QueueWindow {
                 // The count on its icon, as it is drawn: '' when hidden.
                 badge: r.rowAskers.visible ? r.rowAskers.label : '',
                 body: r.body.state?.(),
+                row: [r.rowFirst.get_text(), r.rowSecond.visible ? r.rowSecond.get_text() : ''],
+                table: r.table?.state(),
+                // Whether each of the page's fields and buttons lies wholly
+                // inside the window, as drawn.
+                inView: r === current ? inView(this.window, r) : undefined,
             })),
         };
     }
@@ -855,6 +869,39 @@ export class QueueWindow {
 const ASKERS_CSS = `
 label.askers { font-size: 0.65em; font-weight: bold; opacity: 0.7; margin: 0 -5px -3px 0; }
 `;
+
+// Whether every field and button of record's page is wholly in sight: in
+// the window, and not scrolled out of any scroller it is in.
+function inView(window, record) {
+    const fields = [];
+    const walk = w => {
+        for (let c = w?.get_first_child(); c; c = c.get_next_sibling()) {
+            if (c instanceof Gtk.Entry || c instanceof Gtk.PasswordEntry || c instanceof Gtk.DropDown ||
+                c instanceof Gtk.Text || c instanceof Gtk.TextView || c instanceof Gtk.Button)
+                fields.push(c);
+            else
+                walk(c);
+        }
+    };
+    walk(record.body.widget);
+    const inside = (w, area) => {
+        const [ok, b] = w.compute_bounds(window);
+        const [inOk, a] = area === window
+            ? [true, {get_y: () => 0, get_height: () => window.get_height()}]
+            : area.compute_bounds(window);
+        return ok && inOk && b.get_y() >= a.get_y() - 0.5 &&
+            b.get_y() + b.get_height() <= a.get_y() + a.get_height() + 0.5;
+    };
+    return [...record.buttons, ...fields].every(w => {
+        if (!w.get_mapped() || !inside(w, window))
+            return false;
+        for (let p = w.get_parent(); p; p = p.get_parent()) {
+            if (p instanceof Gtk.ScrolledWindow && !inside(w, p))
+                return false;
+        }
+        return true;
+    });
+}
 
 const isButton = widget => widget instanceof Gtk.Button || widget instanceof Gtk.CheckButton;
 

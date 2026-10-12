@@ -3,6 +3,7 @@ package tests
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -441,4 +442,60 @@ func TestTheUsersSocketFromSystemd(t *testing.T) {
 			serves(t, path)
 		})
 	}
+}
+
+// tableDialog is the sudo dialog with a table of n rows: a process chain
+// a row, each a command of a few lines.
+func tableDialog(n int) string {
+	rows := make([][]string, n)
+	for i := range rows {
+		rows[i] = []string{fmt.Sprint(1000 + i), fmt.Sprintf("bash -c\n    cd /home/dan/%d\n    && make", i)}
+	}
+	b, _ := json.Marshal(map[string]any{"galley": 4, "item": map[string]any{
+		"kind": "forms", "level": "normal", "title": "sudo make install", "text": "/run/current-system/sw/bin/make install",
+		"buttons": []map[string]any{{"answer": "cancel", "label": "Cancel", "underline": -1}, {"answer": "ok", "label": "Allow", "underline": -1}},
+		"default": 1,
+		"forms": map[string]any{"fields": []map[string]any{
+			{"kind": "password", "label": "Password for dan"},
+			{"kind": "entry", "label": "Remember the password for this claude for", "text": "15"},
+			{"kind": "combo", "label": "", "values": []string{"minutes", "hours"}}}},
+		"table": map[string]any{"columns": []string{"PID", "Process"}, "rows": rows, "monospace": []int{1},
+			"summary": "claude ← make install"},
+	}})
+	return string(b)
+}
+
+// A long table scrolls in what height the window has left, never pushing
+// the fields or the buttons out of it; a short one is only as tall as its
+// rows; and the row in the queue shows the title and the table's summary.
+func TestATableScrollsAndLeavesTheFieldsInView(t *testing.T) {
+	need(t)
+	long := postService(t, tableDialog(60))
+	waitFor(t, "the long table", items(1))
+	start(t, "", "--show").expect(t, 0, "")
+	s := waitFor(t, "the long table", func(s state) bool {
+		return s.Visible && len(s.Items) == 1 && s.Items[0].Table != nil && s.Items[0].Table.Height > 0 && s.Items[0].InView != nil
+	})
+	it := s.Items[0]
+	if it.Table.Rows != 60 || !it.Table.Scrolls || !*it.InView {
+		t.Errorf("long table: %+v, in view %v", *it.Table, *it.InView)
+	}
+	if len(it.Row) != 2 || it.Row[0] != "sudo make install" || it.Row[1] != "claude ← make install" {
+		t.Errorf("row = %q", it.Row)
+	}
+	long.conn.Close()
+	waitFor(t, "the long table to go", items(0))
+
+	short := postService(t, tableDialog(1))
+	waitFor(t, "the short table", items(1))
+	start(t, "", "--show").expect(t, 0, "")
+	s = waitFor(t, "the short table", func(s state) bool {
+		return s.Visible && len(s.Items) == 1 && s.Items[0].Table != nil && s.Items[0].Table.Height > 0 && s.Items[0].InView != nil
+	})
+	it = s.Items[0]
+	if it.Table.Scrolls || it.Table.Height > 120 || !*it.InView {
+		t.Errorf("short table: %+v, in view %v", *it.Table, *it.InView)
+	}
+	short.conn.Close()
+	waitFor(t, "the short table to go", items(0))
 }

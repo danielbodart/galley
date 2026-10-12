@@ -134,6 +134,7 @@ func TestNeeds(t *testing.T) {
 		{"a form", Item{Kind: KindForms, Forms: &Forms{Fields: []Field{{Kind: FieldEntry}}}}, 2},
 		{"a level", Item{Kind: KindQuestion, Level: LevelNormal}, 3},
 		{"a field's text", Item{Kind: KindForms, Forms: &Forms{Fields: []Field{{Kind: FieldEntry, Text: "15"}}}}, 3},
+		{"a table", Item{Kind: KindQuestion, Level: LevelNormal, Table: &Table{Columns: []string{"pid"}}}, 4},
 	} {
 		if got := Needs(&c.item); got != c.want {
 			t.Errorf("%s needs %d, want %d", c.name, got, c.want)
