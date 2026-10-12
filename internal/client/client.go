@@ -10,6 +10,7 @@ package client
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -114,6 +115,8 @@ for its options.
   --diff-path=NAME --diff-new=FILE [--diff-old=FILE]
                  show the change from the old file (none: a new file)
                  to FILE as a unified diff, its headers naming NAME
+  --diff=FILE    the same, from FILE holding {"path","old","new"} as
+                 JSON, or - for stdin
   --always       add the window's Always button, never the default,
                  which prints "always" and exits as OK does
 
@@ -248,8 +251,13 @@ func ask(inv *zenity.Invocation, env Env) int {
 		if item.Diff != nil {
 			d := *item.Diff
 			var err error
-			if d.New, err = diffSide(inv.DiffNew); err == nil && inv.DiffOld != "" {
-				d.Old, err = diffSide(inv.DiffOld)
+			switch {
+			case inv.Diff != "":
+				d, err = diffJSON(inv.Diff, env.Stdin)
+			default:
+				if d.New, err = diffSide(inv.DiffNew); err == nil && inv.DiffOld != "" {
+					d.Old, err = diffSide(inv.DiffOld)
+				}
 			}
 			if err != nil {
 				fmt.Fprintf(env.Stderr, "galley: %v\n", err)
@@ -511,6 +519,53 @@ func diffSide(name string) (string, error) {
 		return "", fmt.Errorf("%s is more than the %d characters a diff shows", name, wire.MaxDiff)
 	}
 	return string(b), nil
+}
+
+// diffJSON is --diff's: a wire.Diff as JSON, read from name or, for "-",
+// stdin, which a question reads for nothing else; strictly, and each side
+// held to what the window shows.
+func diffJSON(name string, stdin io.Reader) (wire.Diff, error) {
+	r := stdin
+	if name != "-" {
+		f, err := os.Open(name)
+		if err != nil {
+			return wire.Diff{}, err
+		}
+		defer f.Close()
+		r = f
+	} else {
+		name = "stdin"
+	}
+	if r == nil {
+		return wire.Diff{}, fmt.Errorf("%s: nothing to read", name)
+	}
+	// Each side's UTF-16 code units are at most 6 bytes of JSON each.
+	b, err := io.ReadAll(io.LimitReader(r, 2*6*wire.MaxDiff+8192+1))
+	if err != nil {
+		return wire.Diff{}, fmt.Errorf("%s: %w", name, err)
+	}
+	if len(b) > 2*6*wire.MaxDiff+8192 {
+		return wire.Diff{}, fmt.Errorf("%s is more than a diff the window shows", name)
+	}
+	if !utf8.Valid(b) {
+		return wire.Diff{}, fmt.Errorf("%s is not UTF-8 text", name)
+	}
+	var d wire.Diff
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&d); err != nil {
+		return wire.Diff{}, fmt.Errorf("%s: %w", name, err)
+	}
+	if dec.More() {
+		return wire.Diff{}, fmt.Errorf("%s: more than one JSON value", name)
+	}
+	switch {
+	case d.Path == "" || len(utf16.Encode([]rune(d.Path))) > 4096:
+		return wire.Diff{}, fmt.Errorf("%s: a diff's path is 1 to 4096 characters", name)
+	case len(utf16.Encode([]rune(d.Old))) > wire.MaxDiff || len(utf16.Encode([]rune(d.New))) > wire.MaxDiff:
+		return wire.Diff{}, fmt.Errorf("%s: a side is more than the %d characters a diff shows", name, wire.MaxDiff)
+	}
+	return d, nil
 }
 
 func readFile(name string) (string, error) {

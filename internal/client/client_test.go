@@ -427,3 +427,43 @@ func TestABadDiffSideIsAnError(t *testing.T) {
 		}
 	}
 }
+
+// --diff=- reads the whole diff as JSON from stdin, as frisket's asker
+// pipes its question's; a file does as well. Anything but a diff -- not
+// JSON, a field it has not, no path -- asks nothing.
+func TestTheDiffIsReadAsJSON(t *testing.T) {
+	diff := `{"path":"~/p/chase.json","old":"","new":"{\n  \"version\": 2\n}\n"}`
+	w := newWindow(t, answering(wire.Answer{Answer: wire.AnswerAlways}))
+	got := w.run(diff, nil, append(append([]string{}, asker...), "--diff=-", "--always")...)
+	if got.code != 0 || got.stdout != "always\n" {
+		t.Errorf("got %+v", got)
+	}
+	hello := <-w.hellos
+	if hello.Galley != 5 || hello.Item.Diff == nil ||
+		*hello.Item.Diff != (wire.Diff{Path: "~/p/chase.json", New: "{\n  \"version\": 2\n}\n"}) {
+		t.Errorf("diff %+v", hello.Item.Diff)
+	}
+
+	file := filepath.Join(t.TempDir(), "diff.json")
+	os.WriteFile(file, []byte(diff), 0o600)
+	w = newWindow(t, answering(wire.Answer{Answer: wire.AnswerOK}))
+	if got := w.run("", nil, append(append([]string{}, asker...), "--diff="+file)...); got.code != 0 {
+		t.Errorf("file: %+v", got)
+	}
+	if hello := <-w.hellos; hello.Item.Diff == nil || hello.Item.Diff.Path != "~/p/chase.json" {
+		t.Errorf("file: %+v", hello.Item.Diff)
+	}
+
+	for _, bad := range []string{"", "not json", `{"path":"a","old":"","new":"","extra":1}`, `{"path":"","new":"x"}`, `{"path":"a"} {}`} {
+		w := newWindow(t, answering(wire.Answer{Answer: wire.AnswerOK}))
+		got := w.run(bad, nil, append(append([]string{}, asker...), "--diff=-")...)
+		if got.code != 255 || got.stderr == "" {
+			t.Errorf("%q: %+v", bad, got)
+		}
+		select {
+		case h := <-w.hellos:
+			t.Errorf("%q asked %+v", bad, h)
+		default:
+		}
+	}
+}

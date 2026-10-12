@@ -961,4 +961,16 @@ func TestTheAskersAlways(t *testing.T) {
 	waitFor(t, "the question again", items(1))
 	press(t, "Return")
 	r.expect(t, 0, "")
+
+	// The diff as frisket's asker pipes it, JSON on stdin.
+	r = start(t, `{"path":"~/Projects/foo/chase.json","old":"{}\n","new":"{\n  \"a\": 1\n}\n"}`,
+		append(asker("piped?"), "--diff=-", "--always")...)
+	s = waitFor(t, "the piped question", items(1))
+	if d := s.Items[0].Diff; d == nil || d.Added != 3 || d.Removed != 1 {
+		t.Errorf("piped diff = %+v", d)
+	}
+	start(t, "", "--show").expect(t, 0, "")
+	focus(t, "Always")
+	press(t, "Return")
+	r.expect(t, 0, "always\n")
 }

@@ -287,7 +287,7 @@ func parse(argv []string) (*read, error) {
 			// galley's own: the window's Always button.
 			r.set[name] = true
 			continue
-		case "diff-path", "diff-old", "diff-new":
+		case "diff", "diff-path", "diff-old", "diff-new":
 			// galley's own: a file's change, shown as a diff.
 			if !hasValue {
 				if i+1 >= len(argv) {
@@ -583,6 +583,10 @@ func settle(r *read) (mode string, warnings []string, err error) {
 		return "", warnings, unsupported("cancel-label")
 	case r.set["always"] && !in("question"):
 		return "", warnings, unsupported("always")
+	case r.set["diff"] && !in("question"):
+		return "", warnings, unsupported("diff")
+	case r.set["diff"] && (r.set["diff-path"] || r.set["diff-old"] || r.set["diff-new"]):
+		return "", warnings, &Error{Message: "--diff is the whole diff: give it or --diff-path, --diff-old and --diff-new, not both"}
 	case r.set["diff-new"] && !in("question"):
 		return "", warnings, unsupported("diff-new")
 	case (r.set["diff-path"] || r.set["diff-old"]) && !r.set["diff-new"]:

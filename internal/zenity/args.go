@@ -67,6 +67,9 @@ type Invocation struct {
 	// files whose contents are Item.Diff's Old and New, made absolute;
 	// DiffOld empty is a new file. The client reads them.
 	DiffOld, DiffNew string
+	// Diff is galley's --diff: a file holding Item.Diff as JSON, its path,
+	// old and new, made absolute, or "-" for stdin. The client reads it.
+	Diff string
 
 	// Separator is what joins a list's, a form's or a file chooser's
 	// values, as zenity uses it for each.
@@ -578,6 +581,13 @@ func parseAt(argv []string, cwd string, now time.Time) (*Invocation, error) {
 		inv.DiffNew = absolute(r.str["diff-new"], cwd)
 		if r.set["diff-old"] {
 			inv.DiffOld = absolute(r.str["diff-old"], cwd)
+		}
+	}
+	if r.set["diff"] {
+		item.Diff = &wire.Diff{}
+		inv.Diff = r.str["diff"]
+		if inv.Diff != "-" {
+			inv.Diff = absolute(inv.Diff, cwd)
 		}
 	}
 	item.Always = r.set["always"]

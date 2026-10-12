@@ -422,6 +422,15 @@ func TestTheAskersAlways(t *testing.T) {
 	if _, _, ok := inv.Output(wire.Answer{Answer: wire.AnswerAlways}); ok {
 		t.Error("always answered an item with no Always")
 	}
+	// --diff is the whole diff, from a file or stdin.
+	inv, err = Parse(append(asker("x"), "--diff=-", "--always"), "/work")
+	if err != nil || inv.Diff != "-" || inv.Item.Diff == nil || !inv.Item.Always || inv.DiffNew != "" {
+		t.Errorf("--diff=-: %+v, %v", inv, err)
+	}
+	inv, _ = Parse(append(asker("x"), "--diff", "d.json"), "/work")
+	if inv.Diff != "/work/d.json" {
+		t.Errorf("--diff file: %q", inv.Diff)
+	}
 	inv, _ = Parse(asker("x"), "/")
 	if inv.Item.Diff != nil || inv.Item.Always || wire.Needs(&inv.Item) != 1 {
 		t.Errorf("plain asker = %+v", inv.Item)
@@ -437,6 +446,9 @@ func TestTheAskersAlways(t *testing.T) {
 		{[]string{"--question", "--diff-old=a"}, "--diff-path and --diff-old need --diff-new"},
 		{[]string{"--question", "--diff-new=a"}, "--diff-new needs --diff-path"},
 		{[]string{"--question", "--diff-new"}, "This option is not available."},
+		{[]string{"--info", "--diff=-"}, "--diff is not supported for this dialog"},
+		{[]string{"--question", "--diff=-", "--diff-path=a"}, "--diff is the whole diff"},
+		{[]string{"--question", "--diff=-", "--diff-new=a", "--diff-path=a"}, "--diff is the whole diff"},
 	} {
 		if _, err := Parse(c.args, "/"); err == nil || !strings.HasPrefix(err.Error(), c.want) {
 			t.Errorf("%q: got %v, want %q", c.args, err, c.want)
