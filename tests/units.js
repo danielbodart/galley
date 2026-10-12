@@ -136,6 +136,15 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     bad('a key that is not one character', {buttons: [{answer: 'ok', label: 'x', key: 'xy'}]}, /longer/);
     bad('an underline past the label', {buttons: [{answer: 'ok', label: 'ab', underline: 2}]}, /underline/);
     bad('a huge text', {text: 'x'.repeat((1 << 20) + 1)}, /longer/);
+
+    // A title of any length is shown, cut short with an ellipsis, never
+    // refused: the text still carries the whole of what is asked.
+    const titled = title => validate({...good, title}).title;
+    check('a title of the most is kept', titled('x'.repeat(1024)), 'x'.repeat(1024));
+    check('a longer title is cut short', titled('x'.repeat(1025)), 'x'.repeat(1023) + '…');
+    check('a huge title is cut short', titled('x'.repeat(1 << 20)), 'x'.repeat(1023) + '…');
+    check('a title is never cut inside a character', titled('x'.repeat(1022) + '😀😀'), 'x'.repeat(1022) + '…');
+    check('a title of the most in characters is kept', titled('x'.repeat(1022) + '😀'), 'x'.repeat(1022) + '😀');
 }
 
 // ---- the second protocol's items -------------------------------------------

@@ -8,6 +8,8 @@
 // The client fits zenity's command line to these limits before it sends --
 // sizes clamped, titles and labels cut short, more than 16 buttons refused
 // (internal/zenity/args.go) -- so only an item written by hand meets them.
+// A title, whoever sent it, is cut short here too rather than refused: it
+// is a heading, and the text carries the whole of what is asked.
 
 // The kinds each protocol version knows (wire).
 const KINDS_1 = ['question', 'info', 'warning', 'error', 'entry', 'text'];
@@ -32,6 +34,24 @@ function string(value, name, max, fallback = '') {
     if (value.length > max)
         throw new Error(`${name} is longer than ${max}`);
     return value;
+}
+
+// The most of a title that is shown, in UTF-16 code units, as the client
+// cuts zenity's --title (internal/zenity/args.go).
+const MAX_TITLE = 1024;
+
+// clip cuts s to at most max UTF-16 code units, the last of them an
+// ellipsis when anything was cut, never between a character's halves.
+function clip(s, max) {
+    if (s.length <= max)
+        return s;
+    let n = 0;
+    for (const c of s) {
+        if (n + c.length > max - 1)
+            break;
+        n += c.length;
+    }
+    return `${s.slice(0, n)}…`;
 }
 
 function int(value, name, min, max, fallback = 0) {
@@ -101,7 +121,7 @@ export function validate(raw, version = 1) {
 
     const item = {
         kind: raw.kind,
-        title: string(raw.title, 'title', 1024),
+        title: clip(string(raw.title, 'title', Infinity), MAX_TITLE),
         text: string(raw.text, 'text', 1 << 20),
         markup: bool(raw.markup),
         icon: string(raw.icon, 'icon', 4096),

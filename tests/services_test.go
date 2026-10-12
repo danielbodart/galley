@@ -149,6 +149,20 @@ func TestAClientTitledAsAServiceIsNotInItsGroup(t *testing.T) {
 	}
 }
 
+// A service's title of any length is shown cut short with an ellipsis,
+// never refused, as zenity's --title is.
+func TestAServicesLongTitleIsCutShort(t *testing.T) {
+	need(t)
+	p := postService(t, fmt.Sprintf(`{"galley":3,"item":{"kind":"question","title":%q,"text":"x",`+
+		`"buttons":[{"answer":"cancel","label":"Refuse","key":"r"}],"default":-1}}`, strings.Repeat("é", 5000)))
+	s := waitFor(t, "the long title", items(1))
+	if s.Items[0].Title != strings.Repeat("é", 1023)+"…" {
+		t.Errorf("title is %d runes", len([]rune(s.Items[0].Title)))
+	}
+	press(t, "r")
+	p.answer(t, `{"answer":"cancel"}`)
+}
+
 // A service's follow lines keep its markup off and its icon galley's.
 func TestAServiceFollowLineHasNoMarkupNorItsOwnIcon(t *testing.T) {
 	need(t)
