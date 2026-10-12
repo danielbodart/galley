@@ -85,10 +85,13 @@ func setUp(daemon, broadwayd string, m *testing.M) (int, error) {
 		return 0, err
 	}
 	daemonArgs, daemonEnv = strings.Fields(daemon), env
-	d := exec.Command(daemonArgs[0], daemonArgs[1:]...)
+	args, err := configured(dir, fmt.Sprintf(`{"services": {%q: "Me"}}`, me.Username))
+	if err != nil {
+		return 0, err
+	}
+	d := exec.Command(args[0], args[1:]...)
 	d.Env = append(env, "GALLEY_TEST_CONTROL="+filepath.Join(dir, "ctl"),
-		"GALLEY_SERVICES_SOCKET="+filepath.Join(dir, "services"),
-		fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
+		"GALLEY_SERVICES_SOCKET="+filepath.Join(dir, "services"))
 	d.Stdout, d.Stderr = os.Stderr, os.Stderr
 	if err := d.Start(); err != nil {
 		return 0, err
@@ -111,6 +114,17 @@ func setUp(daemon, broadwayd string, m *testing.M) (int, error) {
 	return m.Run(), nil
 }
 
+// configured is the window's command line with its settings, body, in a
+// file in dir. Every window here is given one, so none reads the settings
+// of whoever runs the tests.
+func configured(dir, body string) ([]string, error) {
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		return nil, err
+	}
+	return append(append([]string{}, daemonArgs...), "-config", path), nil
+}
+
 // listening is a socket listening at path, as systemd makes one.
 func listening(path string) (*os.File, error) {
 	l, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
@@ -123,9 +137,14 @@ func listening(path string) (*os.File, error) {
 }
 
 // activated is the window as systemd starts it with its socket passed as
-// fd 3, named name, in LISTEN_FDS for its own pid.
-func activated(name string, socket *os.File, env ...string) *exec.Cmd {
-	d := exec.Command("sh", append([]string{"-c", `export LISTEN_PID=$$; exec "$@"`, "sh"}, daemonArgs...)...)
+// fd 3, named name, in LISTEN_FDS for its own pid, with no settings but its
+// file in dir.
+func activated(dir, name string, socket *os.File, env ...string) *exec.Cmd {
+	args, err := configured(dir, "{}")
+	if err != nil {
+		panic(err)
+	}
+	d := exec.Command("sh", append([]string{"-c", `export LISTEN_PID=$$; exec "$@"`, "sh"}, args...)...)
 	d.Env = append(append(append([]string{}, daemonEnv...), "LISTEN_FDS=1", "LISTEN_FDNAMES="+name), env...)
 	d.ExtraFiles = []*os.File{socket}
 	d.Stdout, d.Stderr = os.Stderr, os.Stderr
@@ -139,7 +158,7 @@ func clean(env []string) []string {
 	for _, e := range env {
 		name, _, _ := strings.Cut(e, "=")
 		switch name {
-		case "WAYLAND_DISPLAY", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "GALLEY_SOCKET":
+		case "WAYLAND_DISPLAY", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "GALLEY_SOCKET", "GALLEY_SERVICES_SOCKET", "GTK_A11Y":
 			continue
 		}
 		out = append(out, e)

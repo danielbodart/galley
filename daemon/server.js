@@ -9,10 +9,10 @@
 // asked, and a connection that closes first takes its item away unanswered.
 // See wire for the lines in each direction.
 //
-// $GALLEY_SERVICES_SOCKET, when set, is a second socket, for system users'
-// services: bound here, so that a service's peer is this process, open to
-// every user, and served only to those $GALLEY_SERVICES names
-// (services.js).
+// When the settings name services, a second socket is for those system
+// users' services: /run/galley-ask/<user>.sock, or $GALLEY_SERVICES_SOCKET,
+// bound here, so that a service's peer is this process, open to every user,
+// and served only to the users named (services.js).
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';

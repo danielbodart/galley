@@ -14,6 +14,7 @@ import {validate, rows, progressUpdate, notify} from '../daemon/validate.js';
 import {formatDate} from '../daemon/dates.js';
 import {tint, symbolicName, css, levelIcon} from '../daemon/icons.js';
 import {admitted, fromService} from '../daemon/services.js';
+import {parseConfig, configArg, loadConfig, defaults} from '../daemon/config.js';
 import {isDiff, diffSpans, MAX_DIFF} from '../daemon/diff.js';
 import {label} from '../daemon/tray.js';
 
@@ -290,12 +291,10 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
 {
     const passwd = 'root:x:0:0::/root:/bin/sh\nssh-signer:x:951:951::/:/sbin/nologin\n' +
         'sudo-gate:x:952:952::/:/sbin/nologin\nbroken:x:abc:1::/:/\n';
-    const map = admitted('{"ssh-signer":"SSH signer","sudo-gate":"sudo","ghost":"Ghost","broken":"B"}', passwd);
+    const map = admitted({'ssh-signer': 'SSH signer', 'sudo-gate': 'sudo', ghost: 'Ghost', broken: 'B'}, passwd);
     check('admitted', [...map.entries()], [[951, {name: 'ssh-signer', label: 'SSH signer'}],
         [952, {name: 'sudo-gate', label: 'sudo'}]]);
-    check('none set', admitted(undefined, passwd).size, 0);
-    throws('not an object', () => admitted('["ssh-signer"]', passwd), /object/);
-    throws('a label not a string', () => admitted('{"ssh-signer":1}', passwd), /label/);
+    check('none set', admitted({}, passwd).size, 0);
 
     const ask = {kind: 'question', title: 'ssh to server', text: '<b>x</b>', markup: true, icon: 'media-tape',
         buttons: [{answer: 'cancel', label: 'Refuse'}]};
@@ -307,6 +306,57 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
         ['security-medium', 'dialog-warning', 'security-low']);
     check('each level its own colour', new Set(Object.values(levelIcon).map(tint)).size, 3);
     check('a service\'s item is never the same as another', sameness(item('normal')), null);
+}
+
+// ---- the settings file -------------------------------------------------------
+//
+// The examples `galley check` is tested against (internal/config), so the
+// window and the check agree on what is a config.
+
+{
+    const dir = 'internal/config/testdata';
+    const examples = kind => {
+        const names = [];
+        const d = GLib.Dir.open(`${dir}/${kind}`, 0);
+        for (let n; (n = d.read_name()) !== null;)
+            names.push(n);
+        d.close();
+        return names.sort();
+    };
+    const read = path => new TextDecoder().decode(GLib.file_get_contents(path)[1]);
+    check('there are good examples', examples('good').length > 0, true);
+    check('there are bad examples', examples('bad').length > 0, true);
+    for (const name of examples('good')) {
+        try {
+            parseConfig(read(`${dir}/good/${name}`));
+        } catch (e) {
+            printerr(`FAIL good/${name}: ${e.message}`);
+            failed++;
+        }
+    }
+    for (const name of examples('bad'))
+        throws(`bad/${name}`, () => parseConfig(read(`${dir}/bad/${name}`)), /./);
+
+    check('every setting', parseConfig(read(`${dir}/good/every-setting.json`)),
+        {accessibility: true, services: {'ssh-signer': 'SSH signer', 'sudo-gate': '50% "sudo"'}});
+    check('an empty file is the defaults', parseConfig('{}'), {accessibility: false, services: {}});
+    throws('an unknown key is named', () => parseConfig('{"accesibility": true}'), /unknown field "accesibility"/);
+
+    check('no -config', configArg([]), null);
+    check('-config FILE', configArg(['-config', '/x']), '/x');
+    check('--config=FILE', configArg(['--config=/y']), '/y');
+    throws('-config with no FILE', () => configArg(['-config']), /FILE/);
+    throws('another argument', () => configArg(['--gapplication-service']), /unexpected/);
+
+    const missing = loadConfig(GLib, null);
+    check('no file at the default path is the defaults, unremarked',
+        missing.error === null || !missing.error.includes('No such file'), true);
+    const named = loadConfig(GLib, `${dir}/nowhere.json`);
+    check('a named file that is missing is the defaults, with the error',
+        [named.config, named.error !== null], [defaults(), true]);
+    const bad = loadConfig(GLib, `${dir}/bad/misspelt-key.json`);
+    check('a bad file is the defaults, with the error', [bad.config, /accesibility/.test(bad.error)], [defaults(), true]);
+    check('a good file', loadConfig(GLib, `${dir}/good/every-setting.json`).config.accessibility, true);
 }
 
 // ---- dates -------------------------------------------------------------------

@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/danielbodart/galley/internal/config"
 	"github.com/danielbodart/galley/internal/zenity"
 	"github.com/danielbodart/galley/wire"
 )
@@ -48,6 +49,18 @@ type Env struct {
 // Main runs one invocation and returns its exit status. args includes the
 // program name.
 func Main(args []string, env Env) int {
+	// The window's settings file, for its module to check when it is built.
+	// A word, not an option, so no zenity command line is one; the client
+	// itself never reads the file.
+	if len(args) > 1 {
+		switch args[1] {
+		case "check":
+			return check(args[2:], env)
+		case "schema":
+			fmt.Fprint(env.Stdout, config.Schema)
+			return 0
+		}
+	}
 	inv, err := zenity.Parse(args[1:], env.Cwd)
 	if err != nil {
 		if e, ok := err.(*zenity.Error); ok {
@@ -96,8 +109,27 @@ for its options.
   --show         bring the window forward
   --version      print the version
 
-The window listens on $XDG_RUNTIME_DIR/galley/sock.
+  galley check FILE   read FILE as the window would, and say what is
+                      wrong with it
+  galley schema       print the window's settings file's JSON Schema
+
+The window listens on $XDG_RUNTIME_DIR/galley/sock, and reads its settings
+from $XDG_CONFIG_HOME/galley/config.json, or galley-daemon -config FILE.
 `
+
+// check reads one settings file as the window will, exiting 1 with what is
+// wrong with it, or 2 when not given one file.
+func check(args []string, env Env) int {
+	if len(args) != 1 {
+		fmt.Fprintln(env.Stderr, "galley check: name one config file")
+		return 2
+	}
+	if _, err := config.Load(args[0]); err != nil {
+		fmt.Fprintf(env.Stderr, "galley check: %v\n", err)
+		return 1
+	}
+	return 0
+}
 
 // Socket is where the window listens: $GALLEY_SOCKET if set, for tests and
 // for running a window by hand, else $XDG_RUNTIME_DIR/galley/sock.

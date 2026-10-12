@@ -327,9 +327,9 @@ started before the rest.
   through their own signal handlers and no action answers anything. The one
   action is `show`, and the tray icon's menu, also on the bus, only shows
   the window. GTK's accessibility bus could press a button too, so
-  the units start the window with it off (`GTK_A11Y=none`) unless
-  `services.galley.accessibility` is set; a window started by hand has it
-  on.
+  the window turns it off (`GTK_A11Y=none`) before it makes a widget,
+  unless its settings set `accessibility`; a window with no settings file
+  has it off too.
 - **Caller text is text.** Titles, bodies, labels, a list's cells, a form's
   labels and files are set as plain text. Where zenity reads `--text` as
   markup, galley parses it with Pango and keeps only emphasis -- bold,
@@ -368,10 +368,34 @@ started before the rest.
   puts the process chain there, a process a row -- which takes the height
   left over and scrolls, so the fields and buttons below it stay in sight;
   its `summary` is what the item's row in the queue shows under its title.
-  An item a client sends with a `caller` is refused. A services socket or `$GALLEY_SERVICES` that
-  cannot be set up is logged, and the window serves its user as before.
+  An item a client sends with a `caller` is refused. Settings that cannot
+  be read are logged and the defaults used -- no service admitted, the
+  accessibility bus off -- and a services socket that cannot be set up is
+  logged; either way the window serves its user as before.
 - **The test control is not shipped.** The end-to-end check presses keys
   through `daemon/test-control.js`; the package leaves that file out.
+
+## Settings
+
+The window reads its settings once, at start, from
+`$XDG_CONFIG_HOME/galley/config.json` (`~/.config/galley/config.json`), or
+from the file `galley-daemon -config FILE` names. No file at the default
+path is the defaults. The keys are the home-manager module's option names,
+and the module writes the file from them:
+
+```json
+{
+  "accessibility": false,
+  "services": { "ssh-signer": "SSH signer", "sudo-gate": "sudo" }
+}
+```
+
+It is read strictly: an unknown or misspelt key, a value of the wrong type,
+a `null` or a second JSON value is an error, since each would be a setting
+that silently does not apply. `galley check FILE` reads a file as the
+window would and says what is wrong with it, exiting 1; the module runs it
+when the configuration is built. `galley schema` prints the file's JSON
+Schema (draft 2020-12). The client itself reads no settings.
 
 ## Options
 
@@ -383,10 +407,9 @@ started before the rest.
 | `services.galley.services` | `{ }` | System users whose services may post, by name, to the label shown for each, e.g. `{ ssh-signer = "SSH signer"; }`. Non-empty, the window starts at login and binds `/run/galley-ask/<user>.sock`; the system makes that directory, 0755 and owned by the user. |
 
 Package: `galley` (`bin/galley`, `bin/galley-daemon`). `$GALLEY_SOCKET`
-overrides the socket's path for the client and the window, for tests.
-`$GALLEY_SERVICES_SOCKET` is the services' socket, and `$GALLEY_SERVICES`
-a JSON object of user name to label. `$GALLEY_SOCKET` does not make a
-second window: the window is one application on the session bus, and a
+overrides the socket's path for the client and the window, for tests, and
+`$GALLEY_SERVICES_SOCKET` the services' socket's for the window.
+`$GALLEY_SOCKET` does not make a second window: the window is one application on the session bus, and a
 second `galley-daemon` in the same session says so and exits 1 rather than
 leave its socket unserved.
 

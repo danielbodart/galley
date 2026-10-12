@@ -100,18 +100,18 @@ async function outside() {
     let env = GLib.get_environ();
     for (const name of ['WAYLAND_DISPLAY', 'DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR',
         'GALLEY_SOCKET', 'GTK_THEME', 'ADW_DISABLE_PORTAL', 'ADW_DEBUG_COLOR_SCHEME',
-        'ADW_DEBUG_ACCENT_COLOR', 'ADW_DEBUG_HIGH_CONTRAST', 'GSETTINGS_BACKEND'])
+        'ADW_DEBUG_ACCENT_COLOR', 'ADW_DEBUG_HIGH_CONTRAST', 'GSETTINGS_BACKEND', 'GTK_A11Y'])
         env = GLib.environ_unsetenv(env, name);
     const set = {
         XDG_RUNTIME_DIR: dir,
+        // No settings file there, so the window has its defaults, the
+        // accessibility bus off among them: the appearance does not come
+        // over that bus.
         XDG_CONFIG_HOME: `${dir}/config`,
         GALLEY_SOCKET: `${dir}/sock`,
         GDK_BACKEND: 'broadway',
         BROADWAY_DISPLAY: display,
         GSETTINGS_BACKEND: 'keyfile',
-        // As the units start it (nix/home.nix): the appearance does not
-        // come over the accessibility bus.
-        GTK_A11Y: 'none',
         GALLEY_APPEARANCE_INSIDE: dir,
     };
     for (const [k, v] of Object.entries(set))

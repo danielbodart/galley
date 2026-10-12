@@ -15,7 +15,8 @@ Build the checkout first: `nix build .#galley`. Then start a session whose
 command is a script along these lines:
 
 ```sh
-result/bin/galley-daemon &
+echo '{"accessibility": true}' > /tmp/galley-a11y.json
+result/bin/galley-daemon -config /tmp/galley-a11y.json &
 for i in $(seq 100); do [ -S "$XDG_RUNTIME_DIR/galley/sock" ] && break; sleep 0.1; done
 result/bin/galley --question --title="Allow this request?" --text="…" &
 sleep 0.5; result/bin/galley --show   # the window never raises itself
@@ -25,6 +26,10 @@ wait
 - Use absolute paths to `result/bin`.
 - Pass `app_name: "galley"`. That is the name the window gives AT-SPI (see
   `daemon/main.js`).
+- The window turns GTK's accessibility bus off unless its settings turn it
+  on, so the `-config` with `"accessibility": true` is not optional. It
+  also keeps the window off your own settings, whose services would take
+  the real window's services socket.
 - The window joins AT-SPI only once it is shown, so the `--show` is not
   optional.
 - Then use `dump_tree`, `take_screenshot`, `click_by_text`, `press_key`,

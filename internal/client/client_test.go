@@ -342,3 +342,28 @@ func TestVersion(t *testing.T) {
 		t.Errorf("got %q", out.String())
 	}
 }
+
+// check and schema are for the window's settings file, and reach no window.
+func TestCheckAndSchemaAreTheWindowsSettings(t *testing.T) {
+	run := func(args ...string) (int, string, string) {
+		var out, errs bytes.Buffer
+		env := Env{Stdout: &out, Stderr: &errs, Getenv: func(string) string { return "" }}
+		return Main(append([]string{"/bin/galley"}, args...), env), out.String(), errs.String()
+	}
+	dir := t.TempDir()
+	good, bad := filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json")
+	os.WriteFile(good, []byte(`{"accessibility": false, "services": {"ssh-signer": "SSH signer"}}`), 0o644)
+	os.WriteFile(bad, []byte(`{"accesibility": true}`), 0o644)
+	if code, out, errs := run("check", good); code != 0 || out != "" || errs != "" {
+		t.Errorf("good: %d %q %q", code, out, errs)
+	}
+	if code, _, errs := run("check", bad); code != 1 || !strings.Contains(errs, `unknown field "accesibility"`) {
+		t.Errorf("bad: %d %q", code, errs)
+	}
+	if code, _, _ := run("check"); code != 2 {
+		t.Errorf("no file: %d", code)
+	}
+	if code, out, _ := run("schema"); code != 0 || !strings.Contains(out, `"$schema": "https://json-schema.org/draft/2020-12/schema"`) {
+		t.Errorf("schema: %d %q", code, out)
+	}
+}

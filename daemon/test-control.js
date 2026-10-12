@@ -21,6 +21,9 @@
 //   {"appearance": true}     -> what libadwaita's style manager has made of
 //                               the desktop's settings: dark, accent colour
 //                               and high contrast
+//   {"a11y": true}           -> GTK_A11Y as GTK reads it, when it makes a
+//                               widget: "none" with the accessibility bus
+//                               off
 //
 // A key goes to the window's own handler first, as GTK's capture phase
 // sends it. One the window leaves is passed on the way GTK would pass it to
@@ -148,6 +151,8 @@ async function serve(window, connection) {
             window.show(null);
         } else if (command.appearance) {
             reply = appearance();
+        } else if (command.a11y) {
+            reply = {a11y: GLib.getenv('GTK_A11Y')};
         }
     } catch (e) {
         reply = {error: e.message};

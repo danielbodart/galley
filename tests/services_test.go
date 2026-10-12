@@ -234,16 +234,21 @@ func TestAServiceRowStaysUntilWithdrawn(t *testing.T) {
 	waitFor(t, "the row to go", items(0))
 }
 
-// second starts another window, its own socket and its log in a directory of
-// its own, and waits for path, when it is not empty, to be a socket.
-func second(t *testing.T, path string, env ...string) string {
+// second starts another window with the settings config, its own socket,
+// settings and log in a directory of its own, and waits for path, when it
+// is not empty, to be a socket.
+func second(t *testing.T, path, config string, env ...string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp(runtimeDir, "w")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sock := filepath.Join(dir, "sock")
-	d := exec.Command(daemonArgs[0], daemonArgs[1:]...)
+	args, err := configured(dir, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := exec.Command(args[0], args[1:]...)
 	d.Env = append(append(append([]string{}, daemonEnv...), env...), "GALLEY_SOCKET="+sock)
 	log, err := os.Create(filepath.Join(dir, "log"))
 	if err != nil {
@@ -348,7 +353,7 @@ func TestAnUnlistedUidIsResetAndAStaleSocketIsReplaced(t *testing.T) {
 	if err := os.WriteFile(path, []byte("stale"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	serves(t, second(t, path, "GALLEY_SERVICES_SOCKET="+path, `GALLEY_SERVICES={"root":"Root"}`))
+	serves(t, second(t, path, `{"services": {"root": "Root"}}`, "GALLEY_SERVICES_SOCKET="+path))
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o666 {
 		t.Errorf("services socket %v, %v", info, err)
 	}
@@ -359,14 +364,18 @@ func TestAnUnlistedUidIsResetAndAStaleSocketIsReplaced(t *testing.T) {
 func TestBrokenServicesLeaveTheUsersSocket(t *testing.T) {
 	need(t)
 	me, _ := user.Current()
-	t.Run("a bad GALLEY_SERVICES admits no one", func(t *testing.T) {
+	mine := fmt.Sprintf(`{"services": {%q: "Me"}}`, me.Username)
+	t.Run("a bad config admits no one", func(t *testing.T) {
 		path := filepath.Join(runtimeDir, "bad")
-		serves(t, second(t, path, "GALLEY_SERVICES_SOCKET="+path, fmt.Sprintf(`GALLEY_SERVICES={%q:1}`, me.Username)))
-		hungUp(t, post(t, path, serviceQuestion("normal", "x")))
+		sock := second(t, "", fmt.Sprintf(`{"services": {%q: 1}}`, me.Username), "GALLEY_SERVICES_SOCKET="+path)
+		serves(t, sock)
+		logged(t, sock, "using the default settings")
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Errorf("services socket bound: %v", err)
+		}
 	})
 	t.Run("a services socket that cannot be bound", func(t *testing.T) {
-		sock := second(t, "", "GALLEY_SERVICES_SOCKET="+filepath.Join(runtimeDir, "nowhere", "services"),
-			fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
+		sock := second(t, "", mine, "GALLEY_SERVICES_SOCKET="+filepath.Join(runtimeDir, "nowhere", "services"))
 		serves(t, sock)
 		logged(t, sock, "cannot listen on")
 	})
@@ -375,8 +384,7 @@ func TestBrokenServicesLeaveTheUsersSocket(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		sock := second(t, "", "GALLEY_SERVICES_SOCKET="+filepath.Join(dir, strings.Repeat("x", 120)),
-			fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
+		sock := second(t, "", mine, "GALLEY_SERVICES_SOCKET="+filepath.Join(dir, strings.Repeat("x", 120)))
 		serves(t, sock)
 		logged(t, sock, "longer than a unix socket address holds")
 		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
@@ -385,16 +393,71 @@ func TestBrokenServicesLeaveTheUsersSocket(t *testing.T) {
 	})
 	t.Run("a services socket another window listens on", func(t *testing.T) {
 		path := filepath.Join(runtimeDir, "services")
-		sock := second(t, "", "GALLEY_SERVICES_SOCKET="+path, fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username))
+		sock := second(t, "", mine, "GALLEY_SERVICES_SOCKET="+path)
 		serves(t, sock)
 		logged(t, sock, "another window is already listening")
 		if pid := peerPid(t, path); pid != daemonPid {
 			t.Errorf("peer pid %d, the window's %d", pid, daemonPid)
 		}
 	})
-	t.Run("GALLEY_SERVICES with no services socket", func(t *testing.T) {
-		serves(t, second(t, "", fmt.Sprintf(`GALLEY_SERVICES={%q:"Me"}`, me.Username)))
-	})
+}
+
+// No service named, no services socket: the window binds it only for the
+// services its settings name.
+func TestNoServicesNoServicesSocket(t *testing.T) {
+	need(t)
+	path := filepath.Join(runtimeDir, "unnamed")
+	serves(t, second(t, "", "{}", "GALLEY_SERVICES_SOCKET="+path))
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Errorf("services socket bound: %v", err)
+	}
+}
+
+// The accessibility bus is off unless the settings turn it on, set before
+// GTK makes the window's first widget; a -config the window cannot read
+// leaves it off.
+func TestTheAccessibilityBusIsOffUnlessAskedFor(t *testing.T) {
+	need(t)
+	a11y := func(t *testing.T, ctl string) string {
+		t.Helper()
+		waitForSocket(t, ctl)
+		c, err := net.Dial("unix", ctl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		fmt.Fprintln(c, `{"a11y": true}`)
+		var reply struct {
+			A11y *string `json:"a11y"`
+		}
+		if err := json.NewDecoder(c).Decode(&reply); err != nil {
+			t.Fatal(err)
+		}
+		if reply.A11y == nil {
+			return "(unset)"
+		}
+		return *reply.A11y
+	}
+	if got := a11y(t, filepath.Join(runtimeDir, "ctl")); got != "none" {
+		t.Errorf("the window with services and no accessibility: GTK_A11Y %s", got)
+	}
+	for _, c := range []struct{ name, config, want string }{
+		{"on", `{"accessibility": true}`, "(unset)"},
+		{"off", `{"accessibility": false}`, "none"},
+		{"unreadable", `{"accessibility": "yes"}`, "none"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir, err := os.MkdirTemp(runtimeDir, "y")
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctl := filepath.Join(dir, "ctl")
+			second(t, "", c.config, "GALLEY_TEST_CONTROL="+ctl)
+			if got := a11y(t, ctl); got != c.want {
+				t.Errorf("GTK_A11Y %s, want %s", got, c.want)
+			}
+		})
+	}
 }
 
 // A service's notification goes when its connection does, plain or
@@ -429,7 +492,7 @@ func TestTheUsersSocketFromSystemd(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			d := activated(name, f, "GALLEY_SOCKET="+path)
+			d := activated(dir, name, f, "GALLEY_SOCKET="+path)
 			err = d.Start()
 			f.Close()
 			if err != nil {

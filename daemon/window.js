@@ -27,8 +27,8 @@
 // handlers, never through a GAction: an application's actions are exported
 // on the session bus, so an "answer" action would let any process there
 // press Allow. The only action is "show". GTK's accessibility bus is the
-// other way in -- it can click any button -- and the units start the window
-// with it off (GTK_A11Y=none; see nix/home.nix).
+// other way in -- it can click any button -- and the window turns it off
+// (GTK_A11Y=none) unless its settings' accessibility is on (main.js).
 //
 // Every one of zenity's dialogs is an item here, including those that ask
 // nothing: a progress bar is a live item until it is done and answered, and

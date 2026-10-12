@@ -3,20 +3,26 @@
 # The socket is always there; the window starts on the first question, or at
 # login when services are set, and stays, holding the queue, until the
 # session ends. Nothing here puts galley where zenity was: a caller names
-# galley.
+# galley. accessibility and services are the window's settings, written to
+# ~/.config/galley/config.json under the same names and checked by
+# `galley check` when the configuration is built.
 self:
 { config, lib, pkgs, ... }:
 
 let
   cfg = config.services.galley;
-  # One Environment= assignment, quoted for systemd: % is a specifier,
-  # and inside double quotes \ and " are escaped.
-  assignment = s: "\"" + lib.escape [ "\\" "\"" ] (lib.replaceStrings [ "%" ] [ "%%" ] s) + "\"";
-  environment = lib.optional (!cfg.accessibility) "GTK_A11Y=none"
-    ++ lib.optionals (cfg.services != { }) [
-    "GALLEY_SERVICES_SOCKET=/run/galley-ask/%u.sock"
-    (assignment "GALLEY_SERVICES=${builtins.toJSON cfg.services}")
-  ];
+
+  # The window's settings, keyed as these options are, checked as the window
+  # will read them when the configuration is built.
+  configFile = pkgs.runCommand "galley-config.json"
+    {
+      nativeBuildInputs = [ cfg.package ];
+      config = builtins.toJSON { inherit (cfg) accessibility services; };
+      passAsFile = [ "config" ];
+    } ''
+    cp "$configPath" "$out"
+    galley check "$out"
+  '';
 in
 {
   options.services.galley = {
@@ -34,9 +40,10 @@ in
       default = false;
       description = ''
         Let the window be read and worked through GTK's accessibility bus,
-        as a screen reader needs. Off, the window starts with GTK_A11Y=none:
-        that bus is open to any process in the session, and through it
-        such a process could press Allow on a question it asked itself.
+        as a screen reader needs. Off, the window sets GTK_A11Y=none before
+        it makes a widget: that bus is open to any process in the session,
+        and through it such a process could press Allow on a question it
+        asked itself.
       '';
     };
 
@@ -55,6 +62,9 @@ in
 
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
+
+    # Where the window looks by default, so one started by hand finds it too.
+    xdg.configFile."galley/config.json".source = configFile;
 
     systemd.user.sockets.galley = {
       Unit.Description = "galley's question queue (socket)";
@@ -77,10 +87,11 @@ in
       # the user manager's, which GNOME fills from the session's, and with it
       # the session bus, where the settings portal tells libadwaita the
       # desktop's dark style, accent colour and contrast.
+      # The settings are named by their store path, the same file as the one
+      # in ~/.config, so that a change to them changes the unit, which
+      # restarts the window: it reads them once, at start.
       Service = {
-        ExecStart = "${cfg.package}/bin/galley-daemon";
-      } // lib.optionalAttrs (environment != [ ]) {
-        Environment = environment;
+        ExecStart = "${cfg.package}/bin/galley-daemon -config ${configFile}";
       } // lib.optionalAttrs (cfg.services != { }) {
         # Nothing else brings the services' socket back.
         Restart = "on-failure";

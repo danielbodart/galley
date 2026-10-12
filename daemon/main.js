@@ -3,15 +3,17 @@
 // socket (see nix/galley.socket); it can also be started by hand, when it
 // binds the socket itself.
 //
-//   galley-daemon
+//   galley-daemon [-config FILE]
 //
-// $GALLEY_SERVICES_SOCKET and $GALLEY_SERVICES let system users' services
-// post (server.js, services.js). Neither going wrong stops the window
-// serving its user.
+// Its settings are in FILE, by default $XDG_CONFIG_HOME/galley/config.json
+// (config.js): whether GTK's accessibility bus is on, and which system
+// users' services may post, on /run/galley-ask/<user>.sock (server.js,
+// services.js). Settings that cannot be read are logged and the defaults
+// used instead, so the window still serves its user.
 //
-// $GALLEY_SOCKET overrides where it listens, for tests. It does not make a
-// second window: the window is one application on the session bus, and
-// there is one of it there (see below).
+// $GALLEY_SOCKET and $GALLEY_SERVICES_SOCKET override where it listens, for
+// tests. Neither makes a second window: the window is one application on
+// the session bus, and there is one of it there (see below).
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
@@ -21,6 +23,7 @@ import System from 'system';
 import {QueueWindow} from './window.js';
 import {Server, passed} from './server.js';
 import {admitted} from './services.js';
+import {configArg, loadConfig} from './config.js';
 import {Tray} from './tray.js';
 
 const APP_ID = 'io.github.danielbodart.Galley';
@@ -31,9 +34,28 @@ const APP_ID = 'io.github.danielbodart.Galley';
 GLib.set_prgname('galley');
 GLib.set_application_name('galley');
 
+let named;
+try {
+    named = configArg(System.programArgs);
+} catch (e) {
+    printerr(`galley: ${e.message}`);
+    System.exit(2);
+}
+const {config, error: configError} = loadConfig(GLib, named);
+if (configError)
+    printerr(`galley: using the default settings: ${configError}`);
+
+// GTK reads this as it makes the first widget, so it is set long before.
+// Off, no process in the session can press a button through the
+// accessibility bus.
+if (!config.accessibility)
+    GLib.setenv('GTK_A11Y', 'none', true);
+
 const socketPath = GLib.getenv('GALLEY_SOCKET') ||
     GLib.build_filenamev([GLib.get_user_runtime_dir(), 'galley', 'sock']);
-const servicesPath = GLib.getenv('GALLEY_SERVICES_SOCKET');
+// Where frisket's services look for this user's window.
+const servicesPath = GLib.getenv('GALLEY_SERVICES_SOCKET') ||
+    `/run/galley-ask/${GLib.get_user_name()}.sock`;
 
 // HANDLES_COMMAND_LINE, so that starting does not emit activate and show the
 // window: a socket-activated window is started by an item arriving, and
@@ -92,19 +114,15 @@ app.connect('startup', () => {
     }
 });
 
+// Only when the settings name a service: the socket is the system's, in a
+// directory the system makes for this user.
 function listenServices() {
-    const names = GLib.getenv('GALLEY_SERVICES');
-    if (!servicesPath) {
-        if (names)
-            printerr('galley: GALLEY_SERVICES is set, but GALLEY_SERVICES_SOCKET is not');
+    if (Object.keys(config.services).length === 0)
         return;
-    }
-    if (!names)
-        printerr('galley: GALLEY_SERVICES_SOCKET is set, but GALLEY_SERVICES is not, so it admits no one');
     let admit = new Map();
     try {
         const passwd = new TextDecoder().decode(GLib.file_get_contents('/etc/passwd')[1]);
-        admit = admitted(names, passwd);
+        admit = admitted(config.services, passwd);
     } catch (e) {
         printerr(`galley: admitting no services: ${e.message}`);
     }
@@ -130,5 +148,6 @@ if (app.get_is_remote()) {
     System.exit(1);
 }
 
-const code = app.run([System.programInvocationName, ...System.programArgs]);
+// The arguments are the window's, read above, not GApplication's.
+const code = app.run([System.programInvocationName]);
 System.exit(status || code);
