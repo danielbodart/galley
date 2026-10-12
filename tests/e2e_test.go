@@ -930,3 +930,35 @@ func TestASharedRowTakesNoLines(t *testing.T) {
 	press(t, "r")
 	answer(asked, `{"answer":"cancel"}`)
 }
+
+// frisket's asker offering Always from the command line: the window shows
+// the diff it is given and its own Always button, which Enter does not
+// press while Allow is the default, and which prints "always".
+func TestTheAskersAlways(t *testing.T) {
+	need(t)
+	dir := t.TempDir()
+	old, new := filepath.Join(dir, "old.json"), filepath.Join(dir, "new.json")
+	os.WriteFile(old, []byte("{\n  \"version\": 2\n}\n"), 0o600)
+	os.WriteFile(new, []byte("{\n  \"frisket\": {},\n  \"version\": 2\n}\n"), 0o600)
+	args := append(asker("always?"), "--diff-path=~/Projects/foo/chase.json",
+		"--diff-old="+old, "--diff-new="+new, "--always")
+	r := start(t, "", args...)
+	s := waitFor(t, "the question", items(1))
+	it := s.Items[0]
+	if it.Diff == nil || it.Diff.Added != 1 || it.Diff.Removed != 0 ||
+		!strings.Contains(it.Diff.Text, `+  "frisket": {},`) {
+		t.Errorf("diff = %+v", it.Diff)
+	}
+	if n := len(it.Buttons); n != 4 || it.Buttons[3].Label != "Always" || it.Default != 1 {
+		t.Errorf("buttons = %+v, default %d", it.Buttons, it.Default)
+	}
+	start(t, "", "--show").expect(t, 0, "")
+	focus(t, "Always")
+	press(t, "Return")
+	r.expect(t, 0, "always\n")
+
+	r = start(t, "", args...)
+	waitFor(t, "the question again", items(1))
+	press(t, "Return")
+	r.expect(t, 0, "")
+}

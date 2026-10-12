@@ -367,3 +367,63 @@ func TestCheckAndSchemaAreTheWindowsSettings(t *testing.T) {
 		t.Errorf("schema: %d %q", code, out)
 	}
 }
+
+// --diff-new and --diff-old are read here and sent as the item's diff, in
+// version 5, with --always's button; Always prints "always" and exits 0.
+func TestTheDiffIsReadAndAlwaysAnswered(t *testing.T) {
+	dir := t.TempDir()
+	old, new := filepath.Join(dir, "old.json"), filepath.Join(dir, "new.json")
+	os.WriteFile(old, []byte("{}\n"), 0o600)
+	os.WriteFile(new, []byte("{\n  \"a\": 1\n}\n"), 0o600)
+	args := append(append([]string{}, asker...), "--diff-path=~/p/chase.json", "--diff-old="+old, "--diff-new="+new, "--always")
+
+	w := newWindow(t, answering(wire.Answer{Answer: wire.AnswerAlways}))
+	got := w.run("", nil, args...)
+	if got.code != 0 || got.stdout != "always\n" {
+		t.Errorf("got %+v", got)
+	}
+	hello := <-w.hellos
+	if hello.Galley != 5 || !hello.Item.Always || hello.Item.Diff == nil ||
+		*hello.Item.Diff != (wire.Diff{Path: "~/p/chase.json", Old: "{}\n", New: "{\n  \"a\": 1\n}\n"}) {
+		t.Errorf("hello = %+v %+v", hello, hello.Item.Diff)
+	}
+
+	// Allow and Refuse are answered as ever.
+	w = newWindow(t, answering(wire.Answer{Answer: wire.AnswerOK}))
+	if got := w.run("", nil, args...); got.code != 0 || got.stdout != "" {
+		t.Errorf("allow: %+v", got)
+	}
+	w = newWindow(t, answering(wire.Answer{Answer: wire.AnswerCancel}))
+	if got := w.run("", nil, args...); got.code != 1 || got.stdout != "" {
+		t.Errorf("refuse: %+v", got)
+	}
+
+	// No old file: a new one, every line added.
+	w = newWindow(t, answering(wire.Answer{Answer: wire.AnswerCancel}))
+	w.run("", nil, append(append([]string{}, asker...), "--diff-path=c.json", "--diff-new="+new)...)
+	if hello := <-w.hellos; hello.Item.Diff.Old != "" || hello.Item.Diff.New == "" || hello.Item.Always {
+		t.Errorf("new file: %+v", hello.Item)
+	}
+}
+
+// A side that cannot be read, is not UTF-8 or is bigger than the window
+// shows is an error before anything is asked: shown empty, it would say
+// the file is new.
+func TestABadDiffSideIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	bin, big := filepath.Join(dir, "bin"), filepath.Join(dir, "big")
+	os.WriteFile(bin, []byte{0xff, 0xfe}, 0o600)
+	os.WriteFile(big, bytes.Repeat([]byte("x"), wire.MaxDiff+1), 0o600)
+	for _, side := range []string{filepath.Join(dir, "missing"), bin, big} {
+		w := newWindow(t, answering(wire.Answer{Answer: wire.AnswerOK}))
+		got := w.run("", nil, append(append([]string{}, asker...), "--diff-path=c.json", "--diff-new="+side)...)
+		if got.code != 255 || got.stderr == "" {
+			t.Errorf("%s: %+v", side, got)
+		}
+		select {
+		case h := <-w.hellos:
+			t.Errorf("%s asked %+v", side, h)
+		default:
+		}
+	}
+}

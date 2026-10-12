@@ -392,3 +392,59 @@ func TestExitCodes(t *testing.T) {
 		t.Errorf("ZENITY_ wins over DIALOG_: %d", Code(Cancel, getenv))
 	}
 }
+
+// frisket's asker offering Always: galley's own --diff-* and --always on a
+// question, the files made absolute for the client to read.
+func TestTheAskersAlways(t *testing.T) {
+	inv, err := Parse(append(asker("x"), "--diff-path=~/Projects/foo/chase.json",
+		"--diff-old", "old.json", "--diff-new=/tmp/new.json", "--always"), "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Item.Diff == nil || inv.Item.Diff.Path != "~/Projects/foo/chase.json" || !inv.Item.Always {
+		t.Errorf("item = %+v", inv.Item)
+	}
+	if inv.DiffOld != "/work/old.json" || inv.DiffNew != "/tmp/new.json" {
+		t.Errorf("files = %q %q", inv.DiffOld, inv.DiffNew)
+	}
+	if wire.Needs(&inv.Item) != 5 {
+		t.Errorf("needs %d", wire.Needs(&inv.Item))
+	}
+	if out, o, ok := inv.Output(wire.Answer{Answer: wire.AnswerAlways}); !ok || o != OK || out != "always\n" {
+		t.Errorf("always: %q %v %v", out, o, ok)
+	}
+
+	// No old file is a new one; without --always there is no Always.
+	inv, err = Parse(append(asker("x"), "--diff-path=c.json", "--diff-new=n.json"), "/")
+	if err != nil || inv.DiffOld != "" || inv.Item.Always {
+		t.Errorf("got %+v, %v", inv, err)
+	}
+	if _, _, ok := inv.Output(wire.Answer{Answer: wire.AnswerAlways}); ok {
+		t.Error("always answered an item with no Always")
+	}
+	inv, _ = Parse(asker("x"), "/")
+	if inv.Item.Diff != nil || inv.Item.Always || wire.Needs(&inv.Item) != 1 {
+		t.Errorf("plain asker = %+v", inv.Item)
+	}
+
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--info", "--always"}, "--always is not supported for this dialog"},
+		{[]string{"--entry", "--diff-path=a", "--diff-new=b"}, "--diff-new is not supported for this dialog"},
+		{[]string{"--question", "--diff-path=a"}, "--diff-path and --diff-old need --diff-new"},
+		{[]string{"--question", "--diff-old=a"}, "--diff-path and --diff-old need --diff-new"},
+		{[]string{"--question", "--diff-new=a"}, "--diff-new needs --diff-path"},
+		{[]string{"--question", "--diff-new"}, "This option is not available."},
+	} {
+		if _, err := Parse(c.args, "/"); err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("%q: got %v, want %q", c.args, err, c.want)
+		}
+	}
+}
+
+func asker(text string) []string {
+	return []string{"--question", "--no-markup", "--title=Allow this request?",
+		"--ok-label=Allow", "--cancel-label=Refuse", "--width=640", "--text=" + text}
+}

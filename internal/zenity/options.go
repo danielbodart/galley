@@ -283,6 +283,21 @@ func parse(argv []string) (*read, error) {
 			// galley's own: bring the window forward.
 			r.show = true
 			continue
+		case "always":
+			// galley's own: the window's Always button.
+			r.set[name] = true
+			continue
+		case "diff-path", "diff-old", "diff-new":
+			// galley's own: a file's change, shown as a diff.
+			if !hasValue {
+				if i+1 >= len(argv) {
+					return nil, syntax
+				}
+				i++
+				value = argv[i]
+			}
+			r.str[name], r.set[name] = value, true
+			continue
 		case "html", "url":
 			return nil, &Error{Message: fmt.Sprintf("--%s is not supported by galley: %s", name, refused[name])}
 		}
@@ -566,6 +581,14 @@ func settle(r *read) (mode string, warnings []string, err error) {
 		return "", warnings, unsupported("ok-label")
 	case r.set["cancel-label"] && in("file-selection", "error", "warning", "info"):
 		return "", warnings, unsupported("cancel-label")
+	case r.set["always"] && !in("question"):
+		return "", warnings, unsupported("always")
+	case r.set["diff-new"] && !in("question"):
+		return "", warnings, unsupported("diff-new")
+	case (r.set["diff-path"] || r.set["diff-old"]) && !r.set["diff-new"]:
+		return "", warnings, &Error{Message: "--diff-path and --diff-old need --diff-new, the file as it will be"}
+	case r.set["diff-new"] && r.str["diff-path"] == "":
+		return "", warnings, &Error{Message: "--diff-new needs --diff-path, the file's name as the diff shows it"}
 	case r.set["no-wrap"] && !in("info", "error", "question", "warning", "text-info"):
 		return "", warnings, unsupported("no-wrap")
 	case r.set["ellipsize"] && !in("info", "error", "question", "warning"):

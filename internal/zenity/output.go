@@ -23,6 +23,12 @@ func (inv *Invocation) Output(a wire.Answer) (stdout string, outcome Outcome, ok
 		if a.Index >= 0 && a.Index < len(inv.Extra) {
 			return inv.Extra[a.Index] + "\n", Extra, true
 		}
+	case wire.AnswerAlways:
+		// galley's own button, from --always: said in words, and OK's
+		// exit, so a caller that reads only the status admits it.
+		if inv.Item.Always {
+			return "always\n", OK, true
+		}
 	}
 	return "", Failed, false
 }

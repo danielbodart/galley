@@ -63,6 +63,10 @@ type Invocation struct {
 	Timeout int
 	// Filename is text-info's --filename; empty means stdin.
 	Filename string
+	// DiffOld and DiffNew are galley's --diff-old and --diff-new, the
+	// files whose contents are Item.Diff's Old and New, made absolute;
+	// DiffOld empty is a new file. The client reads them.
+	DiffOld, DiffNew string
 
 	// Separator is what joins a list's, a form's or a file chooser's
 	// values, as zenity uses it for each.
@@ -569,8 +573,24 @@ func parseAt(argv []string, cwd string, now time.Time) (*Invocation, error) {
 			item.Buttons[i].Underline = -1
 		}
 	}
+	if r.set["diff-new"] {
+		item.Diff = &wire.Diff{Path: r.str["diff-path"]}
+		inv.DiffNew = absolute(r.str["diff-new"], cwd)
+		if r.set["diff-old"] {
+			inv.DiffOld = absolute(r.str["diff-old"], cwd)
+		}
+	}
+	item.Always = r.set["always"]
 	inv.Item = item
 	return inv, nil
+}
+
+// absolute is path, made absolute from cwd.
+func absolute(path, cwd string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(cwd, path)
 }
 
 // The dialogs, by zenity's flag, as the kind of item each becomes.

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/danielbodart/galley/internal/config"
@@ -108,6 +109,13 @@ for its options.
 
   --show         bring the window forward
   --version      print the version
+
+  With --question, galley's own:
+  --diff-path=NAME --diff-new=FILE [--diff-old=FILE]
+                 show the change from the old file (none: a new file)
+                 to FILE as a unified diff, its headers naming NAME
+  --always       add the window's Always button, never the default,
+                 which prints "always" and exits as OK does
 
   galley check FILE   read FILE as the window would, and say what is
                       wrong with it
@@ -236,6 +244,19 @@ func ask(inv *zenity.Invocation, env Env) int {
 		}
 	case wire.KindCalendar, wire.KindForms:
 		item.Locale = locale(env.Getenv)
+	case wire.KindQuestion:
+		if item.Diff != nil {
+			d := *item.Diff
+			var err error
+			if d.New, err = diffSide(inv.DiffNew); err == nil && inv.DiffOld != "" {
+				d.Old, err = diffSide(inv.DiffOld)
+			}
+			if err != nil {
+				fmt.Fprintf(env.Stderr, "galley: %v\n", err)
+				return zenity.Code(zenity.Failed, env.Getenv)
+			}
+			item.Diff = &d
+		}
 	case wire.KindAbout:
 		item.Text = fmt.Sprintf("galley %s\n\nA zenity drop-in whose dialogs stack in one window."+
 			"\n\nhttps://github.com/danielbodart/galley\nMIT licence", env.Version)
@@ -467,6 +488,30 @@ func listen(r io.Reader, l *zenity.Listener, send func(any) error, stderr io.Wri
 // Text-info's file is read whole, as zenity does, and capped where a window
 // would no longer be the place to read it.
 const maxText = 16 << 20
+
+// diffSide is one side of a --diff-new or --diff-old: the file's text,
+// UTF-8, no more than the window shows. Unlike text-info's, a file that
+// cannot be read is an error, never shown as empty: the diff would then
+// say the file is new.
+func diffSide(name string) (string, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	// Each UTF-16 code unit is at least one byte of UTF-8.
+	b, err := io.ReadAll(io.LimitReader(f, 4*wire.MaxDiff+1))
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", name, err)
+	}
+	if !utf8.Valid(b) {
+		return "", fmt.Errorf("%s is not UTF-8 text", name)
+	}
+	if n := len(utf16.Encode([]rune(string(b)))); n > wire.MaxDiff {
+		return "", fmt.Errorf("%s is more than the %d characters a diff shows", name, wire.MaxDiff)
+	}
+	return string(b), nil
+}
 
 func readFile(name string) (string, error) {
 	f, err := os.Open(name)
