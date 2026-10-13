@@ -62,13 +62,13 @@ func TestEachDialogPrintsAsZenity(t *testing.T) {
 	}
 }
 
-func TestTheNewerDialogsSpeakTheSecondProtocol(t *testing.T) {
+func TestEveryDialogSpeaksTheOneVersion(t *testing.T) {
 	for _, args := range [][]string{
-		{"--scale"}, {"--entry", "a", "b"}, {"--text-info", "--editable", "--filename=/dev/null"},
+		{"--question"}, {"--scale"}, {"--entry", "a", "b"}, {"--text-info", "--editable", "--filename=/dev/null"},
 	} {
 		w := newWindow(t, answering(wire.Answer{Answer: wire.AnswerCancel}))
 		w.run("", nil, args...)
-		if hello := <-w.hellos; hello.Galley != 2 {
+		if hello := <-w.hellos; hello.Galley != wire.Version {
 			t.Errorf("%q: version %d", args, hello.Galley)
 		}
 	}

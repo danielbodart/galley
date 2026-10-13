@@ -487,32 +487,24 @@ func TestAbout(t *testing.T) {
 	r.expect(t, 0, "")
 }
 
-// A client of the first protocol still reaches the window, and is refused
-// what only the second has.
-func TestAVersionOneClientStillAsks(t *testing.T) {
+// A client of any version but the window's is refused, saying so, and its
+// item is never queued: only the current version is spoken.
+func TestAnotherVersionsClientIsRefused(t *testing.T) {
 	need(t)
-	c, err := net.Dial("unix", filepath.Join(runtimeDir, "galley", "sock"))
-	if err != nil {
-		t.Fatal(err)
+	for _, version := range []string{"1", "4", "6", `"5"`, "null"} {
+		c, err := net.Dial("unix", filepath.Join(runtimeDir, "galley", "sock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintln(c, `{"galley":`+version+`,"item":{"kind":"question","title":"Old","buttons":[{"answer":"ok","label":"Yes","key":"y","underline":0}],"default":0}}`)
+		line, _ := bufio.NewReader(c).ReadString('\n')
+		c.Close()
+		if !strings.Contains(line, `"error"`) || !strings.Contains(line, "is not 5") {
+			t.Errorf("%s: reply = %q", version, line)
+		}
 	}
-	defer c.Close()
-	fmt.Fprintln(c, `{"galley":1,"item":{"kind":"question","title":"Old","buttons":[{"answer":"ok","label":"Yes","key":"y","underline":0}],"default":0}}`)
-	waitFor(t, "the question", items(1))
-	press(t, "y")
-	line, _ := bufio.NewReader(c).ReadString('\n')
-	if strings.TrimSpace(line) != `{"answer":"ok"}` {
-		t.Errorf("answer = %q", line)
-	}
-
-	c2, err := net.Dial("unix", filepath.Join(runtimeDir, "galley", "sock"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c2.Close()
-	fmt.Fprintln(c2, `{"galley":1,"item":{"kind":"scale","buttons":[]}}`)
-	line, _ = bufio.NewReader(c2).ReadString('\n')
-	if !strings.Contains(line, "not one galley shows") {
-		t.Errorf("reply = %q", line)
+	if len(current(t).Items) != 0 {
+		t.Errorf("a refused item was queued")
 	}
 }
 

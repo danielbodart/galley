@@ -11,12 +11,9 @@
 // A title, whoever sent it, is cut short here too rather than refused: it
 // is a heading, and the text carries the whole of what is asked.
 
-// The kinds each protocol version knows (wire).
-const KINDS_1 = ['question', 'info', 'warning', 'error', 'entry', 'text'];
-const KINDS_2 = [...KINDS_1, 'list', 'forms', 'calendar', 'scale', 'password', 'color',
-    'file', 'progress', 'notification', 'about'];
-const KINDS = {1: new Set(KINDS_1), 2: new Set(KINDS_2), 3: new Set(KINDS_2), 4: new Set(KINDS_2),
-    5: new Set(KINDS_2)};
+// The kinds of item (wire).
+const KINDS = new Set(['question', 'info', 'warning', 'error', 'entry', 'text', 'list', 'forms',
+    'calendar', 'scale', 'password', 'color', 'file', 'progress', 'notification', 'about']);
 const LEVELS = new Set(['normal', 'warning', 'danger']);
 const ANSWERS = new Set(['ok', 'cancel', 'extra', 'close']);
 const FIELDS = new Set(['entry', 'password', 'multiline', 'calendar', 'list', 'combo']);
@@ -90,10 +87,10 @@ export function rows(value, name, columns, max = MAX_ROWS) {
     return list(value, name, max, (row, n) => strings(row, n, Math.max(columns, 1), MAX_CELL));
 }
 
-export function validate(raw, version = 1) {
+export function validate(raw) {
     if (typeof raw !== 'object' || raw === null)
         throw new Error('no item');
-    if (!KINDS[version]?.has(raw.kind))
+    if (!KINDS.has(raw.kind))
         throw new Error(`kind ${JSON.stringify(raw.kind)} is not one galley shows`);
     if ('caller' in raw)
         throw new Error('caller is the window\'s to set');
@@ -116,7 +113,7 @@ export function validate(raw, version = 1) {
             label,
             key,
             underline: int(b.underline, 'underline', -1, [...label].length - 1, -1),
-            disabled: version >= 2 && bool(b.disabled),
+            disabled: bool(b.disabled),
         };
     });
 
@@ -132,8 +129,8 @@ export function validate(raw, version = 1) {
         ellipsize: bool(raw.ellipsize),
         buttons,
         default: int(raw.default, 'default', -1, buttons.length - 1, -1),
-        locale: version >= 2 ? string(raw.locale, 'locale', 256) : '',
-        level: version >= 3 ? string(raw.level, 'level', 16, 'normal') : 'normal',
+        locale: string(raw.locale, 'locale', 256),
+        level: string(raw.level, 'level', 16, 'normal'),
     };
     if (!LEVELS.has(item.level))
         throw new Error(`level ${JSON.stringify(item.level)} is not one galley shows`);
@@ -149,7 +146,7 @@ export function validate(raw, version = 1) {
             hidden: bool(entry.hidden),
         };
         // A combo's values: a combo's text is never hidden.
-        if (version >= 2 && entry.values !== undefined && entry.values !== null) {
+        if (entry.values !== undefined && entry.values !== null) {
             item.entry.values = strings(entry.values, 'entry values', MAX_ROWS, MAX_CELL);
             item.entry.hidden = false;
         }
@@ -162,7 +159,7 @@ export function validate(raw, version = 1) {
             more: bool(info.more),
             checkbox: string(info.checkbox, 'checkbox', 1024),
             autoScroll: bool(info.autoScroll),
-            editable: version >= 2 && bool(info.editable),
+            editable: bool(info.editable),
         };
         break;
     }
@@ -196,7 +193,7 @@ export function validate(raw, version = 1) {
                 if (typeof field !== 'object' || field === null || !FIELDS.has(field.kind))
                     throw new Error(`${n} is not a field galley shows`);
                 const columns = strings(field.columns, `${n} columns`, MAX_COLUMNS, 1024);
-                const text = version >= 3 ? string(field.text, `${n} text`, 1 << 16) : '';
+                const text = string(field.text, `${n} text`, 1 << 16);
                 if (text && field.kind === 'password')
                     throw new Error(`${n} is a password and has no text`);
                 return {
@@ -280,14 +277,14 @@ export function validate(raw, version = 1) {
         item.note = {listen: bool(part('note').listen)};
         break;
     }
-    if (version >= 4 && raw.table !== undefined && raw.table !== null)
+    if (raw.table !== undefined && raw.table !== null)
         item.table = table(raw.table);
-    if (version >= 5 && raw.diff !== undefined && raw.diff !== null)
+    if (raw.diff !== undefined && raw.diff !== null)
         item.diff = diff(raw.diff);
     // Always is the window's own button, after the item's, its label the
     // window's, never the default: the item's default was read against the
     // item's buttons alone.
-    if (version >= 5 && bool(raw.always)) {
+    if (bool(raw.always)) {
         item.always = true;
         buttons.push({answer: 'always', index: 0, label: 'Always', key: '', underline: -1, disabled: false});
     }

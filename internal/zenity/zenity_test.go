@@ -407,9 +407,6 @@ func TestTheAskersAlways(t *testing.T) {
 	if inv.DiffOld != "/work/old.json" || inv.DiffNew != "/tmp/new.json" {
 		t.Errorf("files = %q %q", inv.DiffOld, inv.DiffNew)
 	}
-	if wire.Needs(&inv.Item) != 5 {
-		t.Errorf("needs %d", wire.Needs(&inv.Item))
-	}
 	if out, o, ok := inv.Output(wire.Answer{Answer: wire.AnswerAlways}); !ok || o != OK || out != "always\n" {
 		t.Errorf("always: %q %v %v", out, o, ok)
 	}
@@ -432,7 +429,7 @@ func TestTheAskersAlways(t *testing.T) {
 		t.Errorf("--diff file: %q", inv.Diff)
 	}
 	inv, _ = Parse(asker("x"), "/")
-	if inv.Item.Diff != nil || inv.Item.Always || wire.Needs(&inv.Item) != 1 {
+	if inv.Item.Diff != nil || inv.Item.Always {
 		t.Errorf("plain asker = %+v", inv.Item)
 	}
 

@@ -287,7 +287,7 @@ func ask(inv *zenity.Invocation, env Env) int {
 		defer mu.Unlock()
 		return enc.Encode(v)
 	}
-	if err := send(wire.Hello{Galley: wire.Needs(&item), Item: &item}); err != nil {
+	if err := send(wire.Hello{Galley: wire.Version, Item: &item}); err != nil {
 		return unreachable(env, err)
 	}
 

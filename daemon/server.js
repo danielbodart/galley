@@ -22,9 +22,8 @@ import {fromService} from './services.js';
 
 Gio._promisify(Gio.DataInputStream.prototype, 'read_line_async', 'read_line_finish_utf8');
 
-// The protocol versions this window takes (wire): any from the
-// first to its own, so a client older than the window still reaches it.
-const MIN_VERSION = 1;
+// The protocol version this window takes (wire), and the only one: a client
+// of any other is refused rather than guessed at.
 const VERSION = 5;
 
 // The longest line a client may send: a text-info's whole file arrives in
@@ -193,8 +192,8 @@ export class Server {
             }
             const hello = JSON.parse(first);
             const version = hello?.galley;
-            if (!Number.isInteger(version) || version < MIN_VERSION || version > VERSION)
-                throw new Error(`protocol version ${version} is not one from ${MIN_VERSION} to ${VERSION}`);
+            if (version !== VERSION)
+                throw new Error(`protocol version ${version} is not ${VERSION}`);
 
             if (!service && hello.show === true) {
                 this.window.show(typeof hello.token === 'string' ? hello.token : null);
@@ -203,7 +202,7 @@ export class Server {
                 return;
             }
 
-            const item = validate(hello.item, version);
+            const item = validate(hello.item);
             if (service)
                 fromService(item, service, uid, peer.get_unix_pid());
             const client = {
@@ -234,8 +233,6 @@ export class Server {
                     handle.append?.(follow.append);
                 if (follow?.timeout === true)
                     handle.timeout?.();
-                if (version < 2)
-                    continue;
                 if (follow?.rows !== undefined && item.kind === 'list')
                     handle.rows(rows(follow.rows, 'rows', item.list.columns.length));
                 const update = progressUpdate(follow?.progress);

@@ -703,7 +703,7 @@ func TestTheWindowRefusesABadItem(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	fmt.Fprintln(c, `{"galley":1,"item":{"kind":"list","buttons":[]}}`)
+	fmt.Fprintln(c, `{"galley":5,"item":{"kind":"slider","buttons":[]}}`)
 	line, _ := bufio.NewReader(c).ReadString('\n')
 	if !strings.Contains(line, `"error"`) || !strings.Contains(line, "not one galley shows") {
 		t.Errorf("reply = %q", line)
@@ -902,7 +902,7 @@ func TestASharedRowTakesNoLines(t *testing.T) {
 	}
 	buttons := `"buttons":[{"answer":"cancel","label":"Refuse","key":"r"},{"answer":"ok","label":"Approve","key":"a"}]`
 
-	text := `{"galley":2,"item":{"kind":"text","title":"Approve this change?",` + buttons + `,"info":{"text":"- a\n+ b\n"}}}`
+	text := `{"galley":5,"item":{"kind":"text","title":"Approve this change?",` + buttons + `,"info":{"text":"- a\n+ b\n"}}}`
 	_, asked := dial(text)
 	waitFor(t, "the text", items(1))
 	joined, _ := dial(text)
@@ -916,7 +916,7 @@ func TestASharedRowTakesNoLines(t *testing.T) {
 	press(t, "a")
 	answer(asked, `{"answer":"ok"}`)
 
-	list := `{"galley":2,"item":{"kind":"list","title":"Pick one",` + buttons + `,"list":{"columns":["x"],"rows":[["a"],["b"]]}}}`
+	list := `{"galley":5,"item":{"kind":"list","title":"Pick one",` + buttons + `,"list":{"columns":["x"],"rows":[["a"],["b"]]}}}`
 	_, asked = dial(list)
 	waitFor(t, "the list", items(1))
 	joined, _ = dial(list)

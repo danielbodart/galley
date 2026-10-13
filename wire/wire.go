@@ -17,27 +17,16 @@
 // decides it is the code the tests reach. What the window answers is the
 // person's choice, not zenity's output: the client prints it as zenity would.
 //
-// # Versions
+// # Version
 //
-// Version 1 is the first window's: --question, --info, --warning, --error,
-// --entry and --text-info, read-only. Version 2 adds every other dialog,
-// the fields they need, and the lines that go with them: Follow's Rows,
-// Progress and Notify, and Answer's Partial and Queued. Version 3 adds an
-// item's Level, a form field's Text and the Caller the window sets.
-// Version 4 adds an item's Table. Version 5 adds an item's Diff and Always,
-// and the answer AnswerAlways. Each version's lines are the earlier one's with fields added, never changed. A
-// client sends the lowest version its item needs (Needs), so an item that
-// version 1 could carry still reaches a window started before version 2 --
-// the window is long-running, and outlives the client package it came with
-// -- and the window takes any version from 1 to its own.
+// Hello carries the protocol's version, and the window takes only its own,
+// Version, refusing any other rather than guessing what an older or newer
+// client meant: only the current version is spoken. A window started before
+// an upgrade refuses the new client until it is restarted.
 package wire
 
-// Version is the newest the window speaks. MinVersion is the oldest it
-// still takes: it refuses anything outside them rather than guessing.
-const (
-	Version    = 5
-	MinVersion = 1
-)
+// Version is the protocol's, the one version the window takes.
+const Version = 5
 
 // Hello is the first line a client sends.
 type Hello struct {
@@ -52,14 +41,12 @@ type Hello struct {
 
 // The kinds of item. Each is one of zenity's dialogs.
 const (
-	KindQuestion = "question"
-	KindInfo     = "info"
-	KindWarning  = "warning"
-	KindError    = "error"
-	KindEntry    = "entry"
-	KindText     = "text"
-
-	// Version 2.
+	KindQuestion     = "question"
+	KindInfo         = "info"
+	KindWarning      = "warning"
+	KindError        = "error"
+	KindEntry        = "entry"
+	KindText         = "text"
 	KindList         = "list"
 	KindForms        = "forms"
 	KindCalendar     = "calendar"
@@ -94,8 +81,6 @@ type Item struct {
 	Entry *Entry `json:"entry,omitempty"`
 	Info  *Info  `json:"info,omitempty"`
 
-	// Version 2.
-
 	// Locale is the caller's LC_TIME, by the variables that set it, so that
 	// a date is written as the caller's zenity would have written it.
 	Locale   string    `json:"locale,omitempty"`
@@ -109,21 +94,15 @@ type Item struct {
 	Progress *Progress `json:"progress,omitempty"`
 	Note     *Note     `json:"note,omitempty"`
 
-	// Version 3.
-
 	// Level is LevelNormal, LevelWarning or LevelDanger; absent is normal.
 	Level string `json:"level,omitempty"`
 	// Caller is set by the window from the connection's peer. A client
 	// that sends one is refused.
 	Caller *Caller `json:"caller,omitempty"`
 
-	// Version 4.
-
 	// Table is read-only rows shown under the text, before the item's own
 	// body: details to read, such as the processes that asked.
 	Table *Table `json:"table,omitempty"`
-
-	// Version 5.
 
 	// Diff is a change to a file, shown under the text and the table as a
 	// unified diff the window works out itself from Old and New, so what
@@ -192,7 +171,7 @@ type Button struct {
 	// or -1 when Label has no such character to mark.
 	Underline int `json:"underline"`
 	// Disabled is a button that cannot be pressed until a Follow enables
-	// it: a progress item's OK, before it is done. Version 2.
+	// it: a progress item's OK, before it is done.
 	Disabled bool `json:"disabled,omitempty"`
 }
 
@@ -201,7 +180,6 @@ type Entry struct {
 	Text   string `json:"text,omitempty"`
 	Hidden bool   `json:"hidden,omitempty"`
 	// Values makes it a combo: a text field with these to pick from.
-	// Version 2.
 	Values []string `json:"values,omitempty"`
 }
 
@@ -213,7 +191,6 @@ type Info struct {
 	Checkbox   string `json:"checkbox,omitempty"`
 	AutoScroll bool   `json:"autoScroll,omitempty"`
 	// Editable lets the person change the text, which is then answered.
-	// Version 2.
 	Editable bool `json:"editable,omitempty"`
 }
 
@@ -259,7 +236,7 @@ type Field struct {
 	// A combo's values; none, and it has nothing to pick.
 	Values []string `json:"values,omitempty"`
 	// Text is an entry or multiline field's starting text; on a password
-	// field it is refused. Version 3.
+	// field it is refused.
 	Text string `json:"text,omitempty"`
 }
 
@@ -353,8 +330,6 @@ type Follow struct {
 	// Timeout asks the window to answer AnswerTimeout now.
 	Timeout bool `json:"timeout,omitempty"`
 
-	// Version 2.
-
 	// Rows adds rows to a list item.
 	Rows [][]string `json:"rows,omitempty"`
 	// Progress updates a progress item.
@@ -394,13 +369,13 @@ const (
 	AnswerTimeout = "timeout"
 	// AnswerClose is zenity's Escape: the dialog closed with no button.
 	AnswerClose = "close"
-	// AnswerAlways is an item's Always button. Version 5.
+	// AnswerAlways is an item's Always button.
 	AnswerAlways = "always"
 )
 
-// Answer is the window's last line to an item's client, and in version 2
-// may come after Partial or Queued lines. With AnswerOK and AnswerTimeout it
-// carries what the person chose, in the field for the item's kind.
+// Answer is the window's last line to an item's client, and may come after
+// Partial or Queued lines. With AnswerOK and AnswerTimeout it carries what
+// the person chose, in the field for the item's kind.
 type Answer struct {
 	Answer string `json:"answer,omitempty"`
 	Index  int    `json:"index,omitempty"`
@@ -410,8 +385,6 @@ type Answer struct {
 	Shown bool `json:"shown,omitempty"`
 	// Error is the window refusing the Hello, said for the client to print.
 	Error string `json:"error,omitempty"`
-
-	// Version 2.
 
 	// Username is a password item's username.
 	Username *string `json:"username,omitempty"`
@@ -439,40 +412,4 @@ type Answer struct {
 type FieldValue struct {
 	Text *string    `json:"text,omitempty"`
 	Rows [][]string `json:"rows,omitempty"`
-}
-
-// Needs is the lowest version that carries item: 1 for what the first
-// window showed, 5 for a diff or Always, 4 for a table, 3 for a level or
-// a field's text, 2 for anything else.
-func Needs(item *Item) int {
-	if item.Diff != nil || item.Always {
-		return 5
-	}
-	if item.Table != nil {
-		return 4
-	}
-	if item.Level != "" {
-		return 3
-	}
-	if item.Forms != nil {
-		for _, f := range item.Forms.Fields {
-			if f.Text != "" {
-				return 3
-			}
-		}
-	}
-	switch item.Kind {
-	case KindQuestion, KindInfo, KindWarning, KindError:
-	case KindEntry:
-		if item.Entry != nil && item.Entry.Values != nil {
-			return 2
-		}
-	case KindText:
-		if item.Info != nil && item.Info.Editable {
-			return 2
-		}
-	default:
-		return 2
-	}
-	return 1
 }

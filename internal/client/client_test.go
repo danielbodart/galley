@@ -154,9 +154,7 @@ func TestTheItemIsSentWhole(t *testing.T) {
 	w := newWindow(t, answering(wire.Answer{Answer: wire.AnswerOK}))
 	w.run("", nil, asker...)
 	hello := <-w.hellos
-	// What the first protocol carries is sent as it, for a window started
-	// before the second.
-	if hello.Galley != 1 || hello.Item == nil {
+	if hello.Galley != wire.Version || hello.Item == nil {
 		t.Fatalf("hello = %+v", hello)
 	}
 	item := hello.Item

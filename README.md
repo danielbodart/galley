@@ -318,12 +318,9 @@ and mnemonics are undone in the client, where they are tested, and the
 window only draws. What the window answers is what was chosen -- rows, a
 form's values, a date, paths -- and the client prints it as zenity would.
 
-The protocol (`wire`) is versioned, each version the last with
-fields added. A client sends the lowest version its item needs, and the
-window takes any from the first to its own, so a client of either age
-reaches a window of either age for what both know: the window runs on
-across an upgrade, and the six dialogs of the first version still reach one
-started before the rest.
+The protocol (`wire`) carries a version, and the window takes only its
+own: a client of any other is refused rather than guessed at, so a window
+started before an upgrade refuses the new client until it is restarted.
 
 ## Security
 
@@ -373,11 +370,11 @@ started before the rest.
   galley's icon for its `level` -- normal, warning or danger, which also
   has a banner -- is never shared with another row, and goes when its
   service hangs up, a notification included. An item may carry a
-  read-only `table` (protocol version 4), shown under its text -- frisket
+  read-only `table`, shown under its text -- frisket
   puts the process chain there, a process a row -- which takes the height
   left over and scrolls, so the fields and buttons below it stay in sight;
   its `summary` is what the item's row in the queue shows under its title.
-  In version 5 an item may carry a `diff` -- a file's `path`, its `old`
+  An item may also carry a `diff` -- a file's `path`, its `old`
   text and its `new`, each at most 256 KiB -- which the window works out
   and shows as a unified diff itself, coloured and scrolling as the table
   does, so what is shown as changing is the change, whatever the text
@@ -385,6 +382,11 @@ started before the rest.
   after the item's, never the default and pressed by Enter only once Tab
   has reached it, answered `always`. frisket's signer offers these to sign
   a rule into a project's policy file.
+  A Go service asks through the package `services`
+  (`github.com/danielbodart/galley/services`), which finds the user's
+  socket, trusts an answer only from a process of theirs in their
+  `galley.service`, checked by the peer's pidfd before anything is sent,
+  and holds a question, or a notification, until it is answered.
   An item a client sends with a `caller` is refused. Settings that cannot
   be read are logged and the defaults used -- no service admitted, the
   accessibility bus off -- and a services socket that cannot be set up is

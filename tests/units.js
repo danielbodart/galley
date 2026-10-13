@@ -127,7 +127,7 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     const bad = (name, change, pattern) =>
         throws(name, () => validate({...good, ...change}), pattern);
     throws('no item', () => validate(null), /no item/);
-    bad('an unknown kind', {kind: 'list'}, /not one galley shows/);
+    bad('an unknown kind', {kind: 'slider'}, /not one galley shows/);
     bad('a title that is not a string', {title: 3}, /title is not a string/);
     bad('a default past the buttons', {default: 3}, /default/);
     bad('too many buttons', {buttons: Array(17).fill(good.buttons[0])}, /at most 16/);
@@ -148,29 +148,23 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     check('a title of the most in characters is kept', titled('x'.repeat(1022) + '😀'), 'x'.repeat(1022) + '😀');
 }
 
-// ---- the second protocol's items -------------------------------------------
+// ---- the other dialogs' items ----------------------------------------------
 
 {
-    const v2 = raw => validate(raw, 2);
-    const list = v2({kind: 'list', buttons: [], list: {columns: ['a', 'b'], rows: [['1', '2'], ['3']],
+    const list = validate({kind: 'list', buttons: [], list: {columns: ['a', 'b'], rows: [['1', '2'], ['3']],
         type: 'check', hidden: [1], more: true}});
     check('a list', [list.list.columns, list.list.rows, list.list.type, list.list.hidden, list.list.more],
         [['a', 'b'], [['1', '2'], ['3']], 'check', [1], true]);
-    check('a combo is never hidden', v2({kind: 'entry', buttons: [], entry: {hidden: true, values: ['a']}}).entry,
+    check('a combo is never hidden', validate({kind: 'entry', buttons: [], entry: {hidden: true, values: ['a']}}).entry,
         {text: '', hidden: false, values: ['a']});
-    check('a first-protocol entry has no values', validate({kind: 'entry', buttons: [], entry: {values: ['a']}}).entry,
-        {text: '', hidden: false});
-    check('a form', v2({kind: 'forms', buttons: [], forms: {fields: [{kind: 'list', label: 'L'}, {kind: 'combo'}]}}).forms,
+    check('a form', validate({kind: 'forms', buttons: [], forms: {fields: [{kind: 'list', label: 'L'}, {kind: 'combo'}]}}).forms,
         {dateFormat: '%x', fields: [
             {kind: 'list', label: 'L', columns: ['column'], rows: [], showHeader: false, values: null, text: ''},
             {kind: 'combo', label: '', columns: ['column'], rows: [], showHeader: false, values: null, text: ''}]});
-    check('a disabled button', v2({kind: 'progress', buttons: [{answer: 'ok', label: 'OK', disabled: true}]}).buttons[0].disabled,
+    check('a disabled button', validate({kind: 'progress', buttons: [{answer: 'ok', label: 'OK', disabled: true}]}).buttons[0].disabled,
         true);
-    check('a first-protocol button is never disabled',
-        validate({kind: 'info', buttons: [{answer: 'ok', label: 'OK', disabled: true}]}).buttons[0].disabled, false);
 
-    const bad = (name, raw, pattern) => throws(name, () => v2(raw), pattern);
-    throws('a second-protocol kind in the first', () => validate({kind: 'scale', buttons: []}), /not one galley shows/);
+    const bad = (name, raw, pattern) => throws(name, () => validate(raw), pattern);
     bad('a list with no columns', {kind: 'list', buttons: [], list: {columns: []}}, /no columns/);
     bad('a tick list of one column', {kind: 'list', buttons: [], list: {columns: ['a'], type: 'radio'}}, /two columns/);
     bad('a row longer than the columns', {kind: 'list', buttons: [], list: {columns: ['a'], rows: [['1', '2']]}}, /at most 1/);
@@ -190,26 +184,21 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     check('a notification', notify({text: 'hi', icon: 'x', extra: 1}), {text: 'hi', icon: 'x'});
 }
 
-// ---- the third protocol's items --------------------------------------------
+// ---- levels, and fields' text ----------------------------------------------
 
 {
-    const v3 = raw => validate(raw, 3);
-    check('no level is normal', v3({kind: 'question', buttons: []}).level, 'normal');
-    check('a level', v3({kind: 'question', buttons: [], level: 'danger'}).level, 'danger');
-    check('a second-protocol level is normal', validate({kind: 'question', buttons: [], level: 'danger'}, 2).level,
-        'normal');
-    const fields = v3({kind: 'forms', buttons: [], forms: {fields: [
+    check('no level is normal', validate({kind: 'question', buttons: []}).level, 'normal');
+    check('a level', validate({kind: 'question', buttons: [], level: 'danger'}).level, 'danger');
+    const fields = validate({kind: 'forms', buttons: [], forms: {fields: [
         {kind: 'entry', text: '15'}, {kind: 'multiline', text: 'a\nb'}, {kind: 'combo', text: 'x'}]}}).forms.fields;
     check('a field\'s text', fields.map(f => f.text), ['15', 'a\nb', '']);
-    check('a second-protocol field has no text',
-        validate({kind: 'forms', buttons: [], forms: {fields: [{kind: 'entry', text: '15'}]}}, 2).forms.fields[0].text, '');
 
-    const bad = (name, raw, pattern) => throws(name, () => v3(raw), pattern);
+    const bad = (name, raw, pattern) => throws(name, () => validate(raw), pattern);
     bad('a level galley does not know', {kind: 'question', buttons: [], level: 'red'}, /level/);
     bad('a password with text', {kind: 'forms', buttons: [], forms: {fields: [{kind: 'password', text: 'x'}]}},
         /password/);
     bad('a caller', {kind: 'question', buttons: [], caller: {uid: 0, name: 'root', label: 'root', pid: 1}}, /caller/);
-    throws('a caller in any protocol', () => validate({kind: 'question', buttons: [], caller: null}), /caller/);
+    throws('a null caller', () => validate({kind: 'question', buttons: [], caller: null}), /caller/);
 
     // The golden files the wire package reads, as the window reads them.
     const golden = name => JSON.parse(new TextDecoder().decode(GLib.file_get_contents(`wire/testdata/${name}`)[1]));
@@ -217,26 +206,23 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
         ['sudo-dialog.json', 'normal'], ['sudo-dialog-warning.json', 'warning'],
         ['sudo-dialog-danger.json', 'danger'], ['sudo-question.json', 'danger']]) {
         const hello = golden(name);
-        const item = validate(hello.item, hello.galley);
+        const item = validate(hello.item);
         check(`${name}'s level`, item.level, level);
         check(`${name}'s fields`, item.forms?.fields.map(f => [f.kind, f.text]),
             hello.item.forms?.fields.map(f => [f.kind, f.text ?? '']));
     }
 }
 
-// ---- the fourth protocol's items -------------------------------------------
+// ---- tables ------------------------------------------------------------------
 
 {
-    const v4 = raw => validate(raw, 4);
     const t = {columns: ['pid', 'process'], rows: [['5113', 'claude'], ['', 'bash -c\n    make']], monospace: [1],
         summary: 'claude ← bash -c'};
-    check('a table', v4({kind: 'question', buttons: [], table: t}).table, t);
-    check('no table', v4({kind: 'question', buttons: []}).table, undefined);
-    check('a third-protocol table is dropped', validate({kind: 'question', buttons: [], table: t}, 3).table,
-        undefined);
-    check('a table with no monospace', v4({kind: 'question', buttons: [], table: {columns: ['a'], rows: []}}).table,
+    check('a table', validate({kind: 'question', buttons: [], table: t}).table, t);
+    check('no table', validate({kind: 'question', buttons: []}).table, undefined);
+    check('a table with no monospace', validate({kind: 'question', buttons: [], table: {columns: ['a'], rows: []}}).table,
         {columns: ['a'], rows: [], monospace: [], summary: ''});
-    const bad = (name, table, pattern) => throws(name, () => v4({kind: 'question', buttons: [], table}), pattern);
+    const bad = (name, table, pattern) => throws(name, () => validate({kind: 'question', buttons: [], table}), pattern);
     bad('a table that is a list', [], /table/);
     bad('a table with no columns', {columns: [], rows: []}, /no columns/);
     bad('a row wider than the columns', {columns: ['a'], rows: [['x', 'y']]}, /table rows/);
@@ -248,12 +234,11 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
 // ---- the same question -------------------------------------------------------
 
 {
-    const v2 = raw => validate(raw, 2);
     const ask = {
         kind: 'question', title: 'Allow this request?', text: 'GET /', width: 640, icon: 'security-medium',
         buttons: [{answer: 'cancel', label: 'Refuse', key: 'r'}, {answer: 'ok', label: 'Allow', key: 'a'}],
     };
-    const key = raw => sameness(v2(raw));
+    const key = raw => sameness(validate(raw));
     // The whole item, as validate() makes it: fields it does not keep make
     // no difference, any it keeps does.
     check('the same question', key(ask), key({...ask}));
@@ -299,7 +284,7 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     const ask = {kind: 'question', title: 'ssh to server', text: '<b>x</b>', markup: true, icon: 'media-tape',
         buttons: [{answer: 'cancel', label: 'Refuse'}]};
     const signer = {name: 'ssh-signer', label: 'SSH signer'};
-    const item = level => fromService(validate({...ask, level}, 3), signer, 951, 42);
+    const item = level => fromService(validate({...ask, level}), signer, 951, 42);
     check('the caller', item('normal').caller, {uid: 951, name: 'ssh-signer', label: 'SSH signer', pid: 42});
     check('no markup', item('normal').markup, false);
     check('icons by level', ['normal', 'warning', 'danger'].map(l => item(l).icon),
@@ -444,40 +429,37 @@ check('button markup without a key', buttonMarkup(GLib, 'a&b', -1), 'a&amp;b');
     check('unrelated', diffSpans('--- a\n+++ b\n@@ -1 +1 @@\n-abc\n+xyz').some(s => s.kind.endsWith('Word')), false);
 }
 
-// ---- the fifth protocol's items ---------------------------------------------
+// ---- diffs and Always --------------------------------------------------------
 
 {
-    const v5 = raw => validate(raw, 5);
     const buttons = [{answer: 'cancel', label: 'Refuse'}, {answer: 'extra', index: 0, label: 'Allow once'}];
     const d = {path: '~/Projects/foo/chase.json', old: '{}\n', new: '{"a": 1}\n'};
-    check('a diff', v5({kind: 'question', buttons, diff: d}).diff, d);
-    check('a new file', v5({kind: 'question', buttons, diff: {path: 'x', new: 'a\n'}}).diff,
+    check('a diff', validate({kind: 'question', buttons, diff: d}).diff, d);
+    check('a new file', validate({kind: 'question', buttons, diff: {path: 'x', new: 'a\n'}}).diff,
         {path: 'x', old: '', new: 'a\n'});
-    check('no diff', v5({kind: 'question', buttons}).diff, undefined);
-    check('a fourth-protocol diff is dropped', validate({kind: 'question', buttons, diff: d}, 4).diff, undefined);
-    const bad = (name, diff, pattern) => throws(name, () => v5({kind: 'question', buttons, diff}), pattern);
+    check('no diff', validate({kind: 'question', buttons}).diff, undefined);
+    const bad = (name, diff, pattern) => throws(name, () => validate({kind: 'question', buttons, diff}), pattern);
     bad('a diff that is a list', [], /diff/);
     bad('a diff with no path', {old: '', new: ''}, /no path/);
     bad('a path over lines', {path: 'a\nb', new: ''}, /line break/);
     bad('old not a string', {path: 'a', old: 1}, /diff old/);
     bad('new too long', {path: 'a', new: 'x'.repeat(MAX_DIFF_SIDE + 1)}, /diff new is longer/);
-    check('a side at the most', v5({kind: 'question', buttons, diff: {path: 'a', old: 'x'.repeat(MAX_DIFF_SIDE)}})
+    check('a side at the most', validate({kind: 'question', buttons, diff: {path: 'a', old: 'x'.repeat(MAX_DIFF_SIDE)}})
         .diff.old.length, MAX_DIFF_SIDE);
 
     // Always is the window's button, after the item's, never the default.
-    const always = v5({kind: 'question', buttons, default: 1, always: true});
+    const always = validate({kind: 'question', buttons, default: 1, always: true});
     check('always', always.always, true);
     check('always button', always.buttons[2], {answer: 'always', index: 0, label: 'Always', key: '', underline: -1,
         disabled: false});
     check('always is not the default', always.default, 1);
-    check('no always', v5({kind: 'question', buttons}).buttons.length, 2);
-    check('a fourth-protocol always is dropped', validate({kind: 'question', buttons, always: true}, 4).buttons.length, 2);
-    check('always must be true', v5({kind: 'question', buttons, always: 'yes'}).buttons.length, 2);
-    throws('a default on always', () => v5({kind: 'question', buttons, default: 2, always: true}), /default/);
-    throws('a poster\'s always button', () => v5({kind: 'question', buttons: [{answer: 'always', label: 'Sure'}]}),
+    check('no always', validate({kind: 'question', buttons}).buttons.length, 2);
+    check('always must be true', validate({kind: 'question', buttons, always: 'yes'}).buttons.length, 2);
+    throws('a default on always', () => validate({kind: 'question', buttons, default: 2, always: true}), /default/);
+    throws('a poster\'s always button', () => validate({kind: 'question', buttons: [{answer: 'always', label: 'Sure'}]}),
         /no answer galley knows/);
     // Two items alike but for always, or their diffs, are not the same question.
-    check('always is part of sameness', sameness(always) === sameness(v5({kind: 'question', buttons, default: 1})),
+    check('always is part of sameness', sameness(always) === sameness(validate({kind: 'question', buttons, default: 1})),
         false);
 }
 

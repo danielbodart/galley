@@ -23,20 +23,20 @@ var (
 func text(s string) FieldValue { return FieldValue{Text: &s} }
 
 var goldens = map[string]any{
-	"signer-form.json": &Hello{Galley: 3, Item: &Item{
+	"signer-form.json": &Hello{Galley: 5, Item: &Item{
 		Kind: KindForms, Level: LevelNormal, Title: "ssh to github.com",
 		Text:    "claude (pid 5113) ← bash ← git push ← ssh\nkey SHA256:… (dan@dan-blade)\nA grant covers github.com from this claude.",
 		Buttons: []Button{refuse("Refuse"), extra("Allow once"), allow("Allow for")},
 		Default: -1,
 		Forms:   &Forms{Fields: []Field{{Kind: FieldEntry, Label: "Allow for", Text: "15"}, units}},
 	}},
-	"signer-question.json": &Hello{Galley: 3, Item: &Item{
+	"signer-question.json": &Hello{Galley: 5, Item: &Item{
 		Kind: KindQuestion, Level: LevelWarning, Title: "ssh to server",
 		Text:    "launched through systemd --user\nsystemd --user ← ssh",
 		Buttons: []Button{refuse("Refuse"), extra("Allow once")},
 		Default: -1,
 	}},
-	"sudo-dialog.json": &Hello{Galley: 3, Item: &Item{
+	"sudo-dialog.json": &Hello{Galley: 5, Item: &Item{
 		Kind: KindForms, Level: LevelNormal, Title: "sudo systemctl restart foo",
 		Text:    "claude (pid 5113) ← bash\n\n/run/current-system/sw/bin/systemctl restart foo",
 		Buttons: []Button{refuse("Cancel"), allow("Allow")},
@@ -44,21 +44,21 @@ var goldens = map[string]any{
 		Forms: &Forms{Fields: []Field{password,
 			{Kind: FieldEntry, Label: "Remember the password for this claude for", Text: "15"}, units}},
 	}},
-	"sudo-dialog-warning.json": &Hello{Galley: 3, Item: &Item{
+	"sudo-dialog-warning.json": &Hello{Galley: 5, Item: &Item{
 		Kind: KindForms, Level: LevelWarning, Title: "sudo systemctl restart foo",
 		Text:    "launched through systemd --user\nsystemd --user ← bash\n\n/run/current-system/sw/bin/systemctl restart foo",
 		Buttons: []Button{refuse("Cancel"), allow("Allow")},
 		Default: 1,
 		Forms:   &Forms{Fields: []Field{password}},
 	}},
-	"sudo-dialog-danger.json": &Hello{Galley: 3, Item: &Item{
+	"sudo-dialog-danger.json": &Hello{Galley: 5, Item: &Item{
 		Kind: KindForms, Level: LevelDanger, Title: "sudo systemctl stop sshd.service",
 		Text:    "touches a unit that guards this machine\n\nclaude (pid 5113) ← bash\n/run/current-system/sw/bin/systemctl stop sshd.service",
 		Buttons: []Button{refuse("Cancel"), allow("Allow")},
 		Default: 1,
 		Forms:   &Forms{Fields: []Field{password}},
 	}},
-	"sudo-question.json": &Hello{Galley: 3, Item: &Item{
+	"sudo-question.json": &Hello{Galley: 5, Item: &Item{
 		Kind: KindQuestion, Level: LevelDanger, Title: "sudo systemctl stop sshd.service",
 		Text:    "touches a unit that guards this machine\n\nclaude (pid 5113) ← bash\n/run/current-system/sw/bin/systemctl stop sshd.service",
 		Buttons: []Button{refuse("Refuse"), extra("Allow")},
@@ -82,7 +82,7 @@ var goldens = map[string]any{
 	"answer-sudo-dialog-once.json": &Answer{Answer: AnswerOK, Fields: []FieldValue{text("hunter2")}},
 	"answer-cancel.json":           &Answer{Answer: AnswerCancel},
 	"answer-close.json":            &Answer{Answer: AnswerClose},
-	"answer-error.json":            &Answer{Error: "protocol version 4 is not one from 1 to 3"},
+	"answer-error.json":            &Answer{Error: "protocol version 4 is not 5"},
 }
 
 func decode(t *testing.T, data []byte, into any) {
@@ -128,30 +128,10 @@ func TestGoldens(t *testing.T) {
 				if !bytes.Equal(append(written, '\n'), data) {
 					t.Errorf("written as\n%s", written)
 				}
-				if n := Needs(hello.Item); n != hello.Galley {
-					t.Errorf("needs %d, want %d", n, hello.Galley)
+				if hello.Galley != Version {
+					t.Errorf("version %d, want %d", hello.Galley, Version)
 				}
 			}
 		})
-	}
-}
-
-func TestNeeds(t *testing.T) {
-	for _, c := range []struct {
-		name string
-		item Item
-		want int
-	}{
-		{"a question", Item{Kind: KindQuestion}, 1},
-		{"a form", Item{Kind: KindForms, Forms: &Forms{Fields: []Field{{Kind: FieldEntry}}}}, 2},
-		{"a level", Item{Kind: KindQuestion, Level: LevelNormal}, 3},
-		{"a field's text", Item{Kind: KindForms, Forms: &Forms{Fields: []Field{{Kind: FieldEntry, Text: "15"}}}}, 3},
-		{"a table", Item{Kind: KindQuestion, Level: LevelNormal, Table: &Table{Columns: []string{"pid"}}}, 4},
-		{"a diff", Item{Kind: KindQuestion, Level: LevelNormal, Diff: &Diff{Path: "chase.json"}}, 5},
-		{"always", Item{Kind: KindQuestion, Always: true}, 5},
-	} {
-		if got := Needs(&c.item); got != c.want {
-			t.Errorf("%s needs %d, want %d", c.name, got, c.want)
-		}
 	}
 }

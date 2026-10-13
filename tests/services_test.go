@@ -3,6 +3,7 @@ package tests
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/danielbodart/galley/services"
+	"github.com/danielbodart/galley/wire"
 )
 
 // service is a connection to the services socket that has posted hello.
@@ -57,7 +61,7 @@ func golden(t *testing.T, name string) string {
 }
 
 func serviceQuestion(level, text string) string {
-	return fmt.Sprintf(`{"galley":3,"item":{"kind":"question","level":%q,"title":"ssh to server","text":%q,"markup":true,`+
+	return fmt.Sprintf(`{"galley":5,"item":{"kind":"question","level":%q,"title":"ssh to server","text":%q,"markup":true,`+
 		`"buttons":[{"answer":"cancel","label":"Refuse","key":"r"},{"answer":"extra","index":0,"label":"Allow once","key":"a"}],"default":-1}}`,
 		level, text)
 }
@@ -97,7 +101,7 @@ func TestAServiceItemIsShownByItsCallerAndLevel(t *testing.T) {
 
 func TestAServiceMaySendNoCaller(t *testing.T) {
 	need(t)
-	p := postService(t, `{"galley":3,"item":{"kind":"question","buttons":[],"caller":{"uid":0,"name":"root","label":"root","pid":1}}}`)
+	p := postService(t, `{"galley":5,"item":{"kind":"question","buttons":[],"caller":{"uid":0,"name":"root","label":"root","pid":1}}}`)
 	if line, _ := p.r.ReadString('\n'); !strings.Contains(line, "caller") {
 		t.Errorf("reply = %q", line)
 	}
@@ -131,7 +135,7 @@ func TestAClientTitledAsAServiceIsNotInItsGroup(t *testing.T) {
 	need(t)
 	sock := filepath.Join(runtimeDir, "galley", "sock")
 	question := func(title string) string {
-		return fmt.Sprintf(`{"galley":3,"item":{"kind":"question","title":%q,"buttons":[{"answer":"cancel","label":"Refuse","key":"r"}],"default":-1}}`, title)
+		return fmt.Sprintf(`{"galley":5,"item":{"kind":"question","title":%q,"buttons":[{"answer":"cancel","label":"Refuse","key":"r"}],"default":-1}}`, title)
 	}
 	posted := []*service{postService(t, serviceQuestion("normal", "service"))}
 	waitFor(t, "the service", items(1))
@@ -154,7 +158,7 @@ func TestAClientTitledAsAServiceIsNotInItsGroup(t *testing.T) {
 // never refused, as zenity's --title is.
 func TestAServicesLongTitleIsCutShort(t *testing.T) {
 	need(t)
-	p := postService(t, fmt.Sprintf(`{"galley":3,"item":{"kind":"question","title":%q,"text":"x",`+
+	p := postService(t, fmt.Sprintf(`{"galley":5,"item":{"kind":"question","title":%q,"text":"x",`+
 		`"buttons":[{"answer":"cancel","label":"Refuse","key":"r"}],"default":-1}}`, strings.Repeat("é", 5000)))
 	s := waitFor(t, "the long title", items(1))
 	if s.Items[0].Title != strings.Repeat("é", 1023)+"…" {
@@ -167,7 +171,7 @@ func TestAServicesLongTitleIsCutShort(t *testing.T) {
 // A service's follow lines keep its markup off and its icon galley's.
 func TestAServiceFollowLineHasNoMarkupNorItsOwnIcon(t *testing.T) {
 	need(t)
-	p := postService(t, `{"galley":3,"item":{"kind":"progress","level":"warning","title":"t","text":"x","buttons":[],"progress":{}}}`)
+	p := postService(t, `{"galley":5,"item":{"kind":"progress","level":"warning","title":"t","text":"x","buttons":[],"progress":{}}}`)
 	waitFor(t, "the progress", items(1))
 	fmt.Fprintln(p.conn, `{"progress":{"text":"<b>bold</b>"}}`)
 	s := waitFor(t, "the progress text", func(s state) bool { return len(s.Items) == 1 && s.Items[0].Text != "x" })
@@ -177,7 +181,7 @@ func TestAServiceFollowLineHasNoMarkupNorItsOwnIcon(t *testing.T) {
 	p.conn.Close()
 	waitFor(t, "the progress to go", items(0))
 
-	n := postService(t, `{"galley":3,"item":{"kind":"notification","level":"danger","title":"t","buttons":[{"answer":"ok","label":"OK"}],"default":0,"note":{"listen":true}}}`)
+	n := postService(t, `{"galley":5,"item":{"kind":"notification","level":"danger","title":"t","buttons":[{"answer":"ok","label":"OK"}],"default":0,"note":{"listen":true}}}`)
 	for i, text := range []string{"<b>first</b>", "<b>second</b>"} {
 		fmt.Fprintf(n.conn, `{"notify":{"text":%q,"icon":"emblem-ok"}}`+"\n", text)
 		s := waitFor(t, text, func(s state) bool { return len(s.Items) == 1 && s.Items[0].Text == text })
@@ -192,7 +196,7 @@ func TestAServiceFollowLineHasNoMarkupNorItsOwnIcon(t *testing.T) {
 // The services socket only posts items.
 func TestAServiceCannotShowTheWindow(t *testing.T) {
 	need(t)
-	p := postService(t, `{"galley":3,"show":true}`)
+	p := postService(t, `{"galley":5,"show":true}`)
 	if line, _ := p.r.ReadString('\n'); !strings.Contains(line, "error") {
 		t.Errorf("reply = %q", line)
 	}
@@ -328,7 +332,7 @@ func peerPid(t *testing.T, path string) int {
 // The user's socket answers --show.
 func serves(t *testing.T, sock string) {
 	t.Helper()
-	p := post(t, sock, `{"galley":3,"show":true}`)
+	p := post(t, sock, `{"galley":5,"show":true}`)
 	p.answer(t, `{"shown":true}`)
 }
 
@@ -464,13 +468,13 @@ func TestTheAccessibilityBusIsOffUnlessAskedFor(t *testing.T) {
 // listening.
 func TestAServiceNotificationGoesWithItsConnection(t *testing.T) {
 	need(t)
-	p := postService(t, `{"galley":3,"item":{"kind":"notification","title":"t","text":"plain","buttons":[{"answer":"ok","label":"OK"}],"default":0}}`)
+	p := postService(t, `{"galley":5,"item":{"kind":"notification","title":"t","text":"plain","buttons":[{"answer":"ok","label":"OK"}],"default":0}}`)
 	p.answer(t, `{"queued":true}`)
 	waitFor(t, "the notification", items(1))
 	p.conn.Close()
 	waitFor(t, "the notification to go", items(0))
 
-	n := postService(t, `{"galley":3,"item":{"kind":"notification","title":"t","buttons":[{"answer":"ok","label":"OK"}],"default":0,"note":{"listen":true}}}`)
+	n := postService(t, `{"galley":5,"item":{"kind":"notification","title":"t","buttons":[{"answer":"ok","label":"OK"}],"default":0,"note":{"listen":true}}}`)
 	fmt.Fprintln(n.conn, `{"notify":{"text":"listening"}}`)
 	waitFor(t, "the listening notification", items(1))
 	n.conn.Close()
@@ -514,7 +518,7 @@ func tableDialog(n int) string {
 	for i := range rows {
 		rows[i] = []string{fmt.Sprint(1000 + i), fmt.Sprintf("bash -c\n    cd /home/dan/%d\n    && make", i)}
 	}
-	b, _ := json.Marshal(map[string]any{"galley": 4, "item": map[string]any{
+	b, _ := json.Marshal(map[string]any{"galley": 5, "item": map[string]any{
 		"kind": "forms", "level": "normal", "title": "sudo make install", "text": "/run/current-system/sw/bin/make install",
 		"buttons": []map[string]any{{"answer": "cancel", "label": "Cancel", "underline": -1}, {"answer": "ok", "label": "Allow", "underline": -1}},
 		"default": 1,
@@ -641,4 +645,113 @@ func TestALongDiffScrollsAndLeavesTheFieldsInView(t *testing.T) {
 	focus(t, "Always")
 	press(t, "Return")
 	p.answer(t, golden(t, "answer-always.json"))
+}
+
+// servicesClient is package services' Client for the window under test: its
+// services socket under this user's name, and the window's own cgroup,
+// which in the test is this process's, standing in for galley.service.
+func servicesClient(t *testing.T) (services.Client, string) {
+	t.Helper()
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(runtimeDir, "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	if err := os.Symlink(filepath.Join(runtimeDir, "services"), filepath.Join(dir, me.Username+".sock")); err != nil {
+		t.Fatal(err)
+	}
+	cgroup, err := services.CgroupID(daemonPid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return services.Client{Dir: dir, Cgroup: func(int) (uint64, error) { return cgroup, nil }}, me.Username
+}
+
+// Package services asks the real window: the item is shown as a service's,
+// the answer comes back from the window it checked, and cancelling takes
+// the row away.
+func TestPackageServicesAsksTheWindow(t *testing.T) {
+	need(t)
+	cl, name := servicesClient(t)
+	item := &wire.Item{Kind: wire.KindQuestion, Level: wire.LevelWarning, Title: "ssh to server", Text: "a question",
+		Buttons: []wire.Button{{Answer: wire.AnswerCancel, Label: "Refuse", Key: "r", Underline: 0},
+			{Answer: wire.AnswerExtra, Label: "Allow once", Key: "a", Underline: 0}},
+		Default: -1, Always: true}
+	type result struct {
+		a   wire.Answer
+		w   services.Window
+		err error
+	}
+	done := make(chan result)
+	go func() {
+		a, w, err := cl.Ask(context.Background(), name, item)
+		done <- result{a, w, err}
+	}()
+	s := waitFor(t, "the question", items(1))
+	if it := s.Items[0]; it.Caller == nil || it.Caller.Label != "Me" || it.Level != "warning" || it.Text != "a question" {
+		t.Errorf("item = %+v", it)
+	}
+	press(t, "a")
+	r := <-done
+	if r.err != nil || r.a.Answer != wire.AnswerExtra || r.a.Index != 0 {
+		t.Fatalf("got %+v, %v", r.a, r.err)
+	}
+	if r.w.Pid != daemonPid || r.w.Start == 0 || r.w.Cgroup == "" {
+		t.Errorf("window = %+v, want pid %d", r.w, daemonPid)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		a, w, err := cl.Ask(ctx, name, item)
+		done <- result{a, w, err}
+	}()
+	waitFor(t, "the second question", items(1))
+	cancel()
+	if r := <-done; !errors.Is(r.err, context.Canceled) {
+		t.Errorf("cancelled: %v", r.err)
+	}
+	waitFor(t, "the row to go", items(0))
+}
+
+// A notification from package services stays until it is dismissed, and
+// Notify returns then.
+func TestPackageServicesNotificationStaysUntilDismissed(t *testing.T) {
+	need(t)
+	cl, name := servicesClient(t)
+	done := make(chan error)
+	go func() { done <- cl.Notify(context.Background(), name, "The rule was not saved") }()
+	waitFor(t, "the notification", func(s state) bool {
+		return len(s.Items) == 1 && s.Items[0].Text == "The rule was not saved"
+	})
+	select {
+	case err := <-done:
+		t.Fatalf("returned before it was dismissed: %v", err)
+	default:
+	}
+	press(t, "Return")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the notification to go", items(0))
+}
+
+// The window's services socket is refused to anyone checking for a window
+// in another cgroup: what galley.service would be, were the window not in
+// it.
+func TestPackageServicesRefusesAWindowOutsideItsCgroup(t *testing.T) {
+	need(t)
+	cl, name := servicesClient(t)
+	cgroup, _ := cl.Cgroup(0)
+	cl.Cgroup = func(int) (uint64, error) { return cgroup + 1, nil }
+	_, _, err := cl.Ask(context.Background(), name, &wire.Item{Kind: wire.KindQuestion, Buttons: []wire.Button{}, Default: -1})
+	if !errors.Is(err, services.ErrNobody) {
+		t.Fatalf("got %v, want nobody", err)
+	}
+	if len(current(t).Items) != 0 {
+		t.Errorf("an item was posted")
+	}
 }
