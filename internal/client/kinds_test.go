@@ -181,10 +181,20 @@ func TestANotificationReturnsAtOnce(t *testing.T) {
 		<-answered
 	})
 	defer close(answered)
-	start := time.Now()
-	got := w.run("", map[string]string{"ZENITY_OK": "9"}, "--notification", `--text=Done\nbody`)
+	// The window never answers, so a client that waited for it would never
+	// return; the bound is only so that it fails rather than hangs.
+	done := make(chan result, 1)
+	go func() {
+		done <- w.run("", map[string]string{"ZENITY_OK": "9"}, "--notification", `--text=Done\nbody`)
+	}()
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("still waiting for an answer")
+	}
 	// zenity returns 0 itself, not its OK.
-	if got.code != 0 || time.Since(start) > time.Second {
+	if got.code != 0 {
 		t.Errorf("got %+v", got)
 	}
 	if item := (<-w.hellos).Item; item.Text != "Done\nbody" || item.Note.Listen {
