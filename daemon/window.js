@@ -121,8 +121,11 @@ export class QueueWindow {
         this.window = new Adw.Window({
             application: this.app,
             title: 'galley',
-            default_width: 1080,
-            default_height: 560,
+            // Room beside the queue for a question's table, a command 80
+            // characters wide among its columns, and for its text, the
+            // table and the buttons without scrolling.
+            default_width: 1440,
+            default_height: 800,
             width_request: 360,
             height_request: 300,
             hide_on_close: true,
