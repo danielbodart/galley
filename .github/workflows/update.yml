@@ -1,0 +1,141 @@
+# The weekly update: every dependency galley has, moved in the one window a
+# week all of danielbodart's repos share, Sunday 21:23 UTC. nix-config
+# follows at 23:23 on the same nixos-26.05, so the package this builds and
+# pushes is the derivation nix-config builds.
+#
+# What moves: the flake's inputs (nix flake update); mise.toml's tools, each
+# to the latest patch of its pinned minor (a minor moves by hand, with go_1_NN
+# in flake.nix); and the Go requirements (go get -u, go mod tidy, and the
+# flake's vendorHash with them), of which galley has none today.
+#
+# The result is committed straight to trunk, as github-actions[bot], only if
+# everything CI runs passes with it -- mise run check, nix flake check, and
+# the tarballs built and installed -- never as a pull request. The package
+# then goes to danielbodart.cachix.org. A push with GITHUB_TOKEN starts no
+# workflow, so if what moved is something the tarballs are made of
+# (RELEASE_PATHS in mise.toml: Go or a requirement), this starts CI on the
+# pushed commit with release=true; a week where only flake.lock moved
+# releases nothing, since the tarballs do not depend on it.
+name: Weekly update
+on:
+  schedule:
+    - cron: "23 21 * * 0"
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: update
+env:
+  # A requirement that wants a newer Go fails the gate, rather than Go
+  # fetching itself a toolchain mise.toml does not pin.
+  GOTOOLCHAIN: local
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      # The whole history and the tags: the version counts commits, and the
+      # release check compares with the last release tag.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # Reads the cache; what is pushed is only the package, below.
+      - uses: cachix/cachix-action@v17
+        with:
+          name: danielbodart
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: true
+
+      - uses: jdx/mise-action@v5
+
+      - name: Move the flake's inputs
+        run: |
+          nix flake update 2>&1 | tee "$RUNNER_TEMP/flake.log"
+          grep -oE "Updated input '[^'/]+'" "$RUNNER_TEMP/flake.log" | cut -d"'" -f2 >> "$RUNNER_TEMP/moved" || true
+
+      - name: Move mise's tools to the latest patch of their minor
+        run: |
+          mise ls --local --json | jq -r 'to_entries[] | .key + " " + .value[0].requested_version' |
+            while read -r tool pinned; do
+              [[ $pinned =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+              latest=$(mise latest "$tool@${pinned%.*}")
+              [ -n "$latest" ] && [ "$latest" != "$pinned" ] || continue
+              sed -i "s|^\(\"\{0,1\}$tool\"\{0,1\} *= *\)\"$pinned\"|\1\"$latest\"|" mise.toml
+              echo "$tool $pinned -> $latest" >> "$RUNNER_TEMP/moved"
+            done
+          mise install
+
+      # vendorHash = null while there are no requirements; once there are,
+      # the hash Nix reports for a fake one is the new one.
+      - name: Move the Go requirements
+        run: |
+          reqs() { go mod edit -json | jq -r '.Require[]? | .Path + " " + .Version' | sort; }
+          before=$(reqs)
+          go get -u ./...
+          go mod tidy
+          comm -13 <(echo "$before") <(reqs) | cut -d' ' -f1 >> "$RUNNER_TEMP/moved"
+          if ! git diff --quiet -- go.mod go.sum && old=$(grep -oE 'vendorHash = "sha256-[^"]+"' flake.nix | cut -d'"' -f2); then
+            fake=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+            sed -i "s|$old|$fake|" flake.nix
+            new=$(nix build .#galley 2>&1 | grep -oE 'got: +sha256-[^ ]+' | awk '{print $2}' || true)
+            sed -i "s|$fake|${new:?Nix reported no vendorHash}|" flake.nix
+          fi
+
+      - name: What moved
+        id: moved
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then echo "Nothing moved."; exit 0; fi
+          touch "$RUNNER_TEMP/moved"
+          moved=$(sort -u "$RUNNER_TEMP/moved" | paste -sd, - | sed 's/,/, /g')
+          echo "moved=${moved:-$(git status --porcelain | cut -c4- | paste -sd, - | sed 's/,/, /g')}" >> "$GITHUB_OUTPUT"
+
+      - name: mise run check
+        if: steps.moved.outputs.moved
+        run: mise run check
+
+      - name: nix flake check
+        if: steps.moved.outputs.moved
+        run: nix flake check --print-build-logs
+
+      - name: mise run dist
+        if: steps.moved.outputs.moved
+        run: mise run dist
+
+      - name: mise run dist-check
+        if: steps.moved.outputs.moved
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y --no-install-recommends gjs gir1.2-gtk-4.0 gir1.2-adw-1
+          mise run dist-check
+
+      - name: Commit and push
+        if: steps.moved.outputs.moved
+        env:
+          MOVED: ${{ steps.moved.outputs.moved }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Weekly update: $MOVED"
+          git pull -q --rebase origin trunk
+          git push -q origin HEAD:trunk
+
+      - name: Push the package to Cachix
+        if: steps.moved.outputs.moved
+        run: nix build .#galley --print-out-paths | cachix push danielbodart
+
+      - name: Release, if what moved is released
+        if: steps.moved.outputs.moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(mise run -q release-due)" = true ]; then
+            gh workflow run ci.yml --ref trunk -f release=true
+          else
+            echo "Nothing in RELEASE_PATHS moved: no release."
+          fi
