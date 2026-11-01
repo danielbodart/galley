@@ -28,10 +28,11 @@ jobs:
   # Every green push to trunk is a release: v$(scripts/version.sh), tagged on
   # the commit, with a tarball per architecture for a system without Nix
   # (see packaging/install.sh). Nix users take the flake, at trunk or at the
-  # tag.
+  # tag. So is a run started on trunk by hand, or by the weekly flake.lock
+  # bump, whose push with GITHUB_TOKEN starts no workflow of itself.
   release:
     needs: [check]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/trunk' && needs.check.result == 'success'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/trunk' && needs.check.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
