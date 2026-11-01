@@ -1,6 +1,6 @@
 // galley's window: one long-running process that queues every client's
 // question in one window. systemd starts it on the first connection to the
-// socket (see nix/galley.socket); it can also be started by hand, when it
+// socket (see packaging/galley.socket); it can also be started by hand, when it
 // binds the socket itself.
 //
 //   galley-daemon [-config FILE]

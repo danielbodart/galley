@@ -38,9 +38,9 @@ done
 
 # The units and the desktop file with their paths still to fill in:
 # install.sh knows where they go.
-install -Dm644 nix/galley.socket "$root/share/systemd/user/galley.socket"
-install -Dm644 nix/galley.service "$root/share/systemd/user/galley.service"
-install -Dm644 nix/io.github.danielbodart.Galley.desktop \
+install -Dm644 packaging/galley.socket "$root/share/systemd/user/galley.socket"
+install -Dm644 packaging/galley.service "$root/share/systemd/user/galley.service"
+install -Dm644 packaging/io.github.danielbodart.Galley.desktop \
     "$root/share/applications/io.github.danielbodart.Galley.desktop"
 
 install -m755 packaging/install.sh "$root/install.sh"

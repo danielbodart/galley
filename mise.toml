@@ -10,10 +10,11 @@ cosign = "3.1.4"
 
 # What the release tarballs and the Go packages other modules import are made
 # of. A change to any of these since the last release tag is released (see
-# release-due); the workflows, docs, flake.nix, flake.lock and the rest of
-# nix/ are not.
+# release-due); the workflows, docs, flake.nix, flake.lock and nix/ are not.
+# The units and the desktop file the tarballs ship are in packaging/, which
+# the flake's package takes them from too.
 [env]
-RELEASE_PATHS = "cmd internal services wire daemon packaging scripts/dist.sh nix/galley.service nix/galley.socket nix/io.github.danielbodart.Galley.desktop go.mod go.sum mise.toml VERSION"
+RELEASE_PATHS = "cmd internal services wire daemon packaging scripts/dist.sh go.mod go.sum mise.toml VERSION"
 
 [tasks.check]
 description = "gofmt, vet, the client's tests and shellcheck"
@@ -39,6 +40,10 @@ run = "shellcheck scripts/*.sh packaging/install.sh packaging/galley-daemon"
 description = "The client, static, for this machine, into dist/"
 run = "CGO_ENABLED=0 go build -trimpath -o dist/galley ./cmd/galley"
 
+# Only the tarballs, no loose per-architecture binary beside them as other
+# tools ship: the client alone is useless without the window it asks, which
+# is JavaScript, its units and the desktop file, all of which the tarball and
+# its installer bring (the README's Channels says so).
 [tasks.dist]
 description = "The release tarballs, x86_64 and aarch64, and SHA256SUMS, into dist/"
 run = '''
@@ -53,9 +58,9 @@ description = "This machine's tarball, as dist made it, installed into a prefix,
 run = "scripts/dist-check.sh"
 
 [tasks.release-due]
-description = "Print true if anything in RELEASE_PATHS changed since the last release tag, else false"
+description = "Print true and succeed if anything in RELEASE_PATHS changed since the last release tag (or there is none), else print false and fail"
 run = '''
 set -f
 last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null) || { echo true; exit 0; }
-if [ -n "$(git diff --name-only "$last" HEAD -- $RELEASE_PATHS)" ]; then echo true; else echo false; fi
+if [ -n "$(git diff --name-only "$last" HEAD -- $RELEASE_PATHS)" ]; then echo true; else echo false; exit 1; fi
 '''

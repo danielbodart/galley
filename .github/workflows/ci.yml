@@ -14,6 +14,12 @@ on:
 permissions:
   contents: read
 
+# bash, so GitHub runs every step with -eo pipefail: a command that fails on
+# the left of a pipe fails the step rather than handing on what it printed.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # The fast checks, with the toolchain mise.toml pins: gofmt, vet, the
   # client's tests and shellcheck.
@@ -97,8 +103,9 @@ jobs:
         env:
           FORCE: ${{ inputs.release }}
         run: |
-          if [ "$FORCE" = true ]; then due=true; else due=$(mise run -q release-due); fi
-          echo "release=$due" >> "$GITHUB_OUTPUT"
+          if [ "$FORCE" = true ] || mise run -q release-due; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
 
   # The release, v$(scripts/version.sh) -- the version dist built, the run
   # number being the same -- tagged on the commit, once every

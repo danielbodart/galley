@@ -61,14 +61,14 @@
 
           # Its desktop file, which GNOME needs to show its notifications.
           mkdir -p $out/share/applications
-          substitute nix/io.github.danielbodart.Galley.desktop \
+          substitute packaging/io.github.danielbodart.Galley.desktop \
             $out/share/applications/io.github.danielbodart.Galley.desktop \
             --replace-fail @galley@ $out/bin/galley
 
           # The user units, for a system without the home-manager module.
           mkdir -p $out/share/systemd/user
-          install -m644 nix/galley.socket $out/share/systemd/user/galley.socket
-          substitute nix/galley.service $out/share/systemd/user/galley.service \
+          install -m644 packaging/galley.socket $out/share/systemd/user/galley.socket
+          substitute packaging/galley.service $out/share/systemd/user/galley.service \
             --replace-fail @daemon@ $out/bin/galley-daemon
         '';
 

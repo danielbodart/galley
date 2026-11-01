@@ -51,20 +51,30 @@ chooser; `--info` is laid out as `--warning` is, under an icon of its own.
 
 ## Channels
 
-galley ships two ways:
-
-- **Release tarballs** for x86_64 and aarch64 (below, *Without Nix*): the
-  client, the window, its systemd user units and an installer, built by
-  **mise** with the Go `mise.toml` pins, signed by cosign keyless (a
+- **Tarball + systemd**: `galley-linux-x86_64.tar.gz` and
+  `galley-linux-aarch64.tar.gz` on each GitHub release, each the client, the
+  window, its systemd user units (`galley.socket`, `galley.service`), its
+  desktop file, README, LICENSE and `install.sh`: unpack and run
+  `./galley-*/install.sh` (below, *Without Nix*). Built by mise with the Go
+  `mise.toml` pins (`mise run dist`), signed by cosign keyless (a
   `.sigstore.json` bundle beside each) and listed in `SHA256SUMS`.
-- **A Nix package and home-manager module** (below, *With Nix*), built by
-  **nixpkgs** (nixos-26.05, `go_1_27`, the same Go minor as mise's).
+- **Nix**: flake input `github:danielbodart/galley/v<version>` with
+  `inputs.nixpkgs.follows = "nixpkgs"`; `packages.default`, and
+  `homeModules.default` (`services.galley`, a home-manager module: the window
+  is a user service). Built by nixpkgs (nixos-26.05, `go_1_27`, the same Go
+  minor as mise's) and cached at `danielbodart.cachix.org` (below, *With
+  Nix*).
+- Not shipped: Docker - galley is a window on the user's desktop session,
+  which a container has no part in.
+- Not shipped: loose per-architecture binaries - the client alone is useless
+  without the window it asks, which the tarball and its installer bring.
 
-Both are **updated** weekly, Sunday 21:23 UTC (`.github/workflows/update.yml`):
-the flake's inputs, mise's tools to their latest patch and any Go
-requirements, committed to `trunk` once every check passes. A release is cut
-when what the tarballs are made of changes (`RELEASE_PATHS` in `mise.toml`),
-never for flake.lock alone.
+Updated weekly (Sunday 21:23 UTC): the flake's inputs, mise's tools to the
+latest patch of their minor and any Go requirements, committed to `trunk`
+once every check passes. A release is cut when the Go source, the window, the
+units, the desktop file, the installer, `scripts/dist.sh`, `go.mod`,
+`mise.toml` or `VERSION` changed since the last release (`RELEASE_PATHS` in
+`mise.toml`), never for flake.lock alone.
 
 ## Install
 
@@ -74,7 +84,10 @@ Add the flake as an input:
 
 ```nix
 {
-  inputs.galley.url = "github:danielbodart/galley";
+  inputs.galley = {
+    url = "github:danielbodart/galley";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 }
 ```
 

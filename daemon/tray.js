@@ -5,7 +5,7 @@
 // nothing shows it and nothing is lost.
 //
 // It is there from the window's start, which is the first question's
-// arrival (nix/galley.socket), and goes with the window. Nothing in it
+// arrival (packaging/galley.socket), and goes with the window. Nothing in it
 // answers a question: Open does what `galley --show` does. There is no Quit:
 // services that ask through galley expect it to be there.
 
