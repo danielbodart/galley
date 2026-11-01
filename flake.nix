@@ -1,26 +1,29 @@
 {
   description = "A zenity drop-in whose dialogs stack in one window";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
   outputs = { self, nixpkgs }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
 
-      # MAJOR.MINOR.PATCH as scripts/version.sh makes it, as far as Nix can:
-      # the MAJOR is committed, 0 saying the interfaces are still moving; the
-      # MINOR, the commit count, Nix knows only from a git+ ref (a github:
-      # ref, or a tag of a release, gives none, so 0); the PATCH, CI's run
-      # number, it never knows. The release tarballs carry the whole of it.
-      major = nixpkgs.lib.fileContents ./VERSION;
-      version = "${major}.${toString (self.revCount or 0)}.0";
+      # A build from a commit, named as nixpkgs names one: 0-unstable-DATE,
+      # the date of the commit, which a github: ref gives as well as a git+
+      # one. It never pretends to be a release; the release tarballs carry
+      # the release's version (scripts/version.sh).
+      date = builtins.substring 0 8 (self.lastModifiedDate or "19700101");
+      version = "0-unstable-${builtins.substring 0 4 date}-${builtins.substring 4 2 date}-${builtins.substring 6 2 date}";
+
+      # Go at the minor mise.toml pins, so the tarballs and the package are
+      # built by the same Go.
+      go = pkgs: pkgs.go_1_27;
 
       # What the window is built of: GJS, and the libraries it reaches
       # through GObject introspection.
       windowInputs = pkgs: [ pkgs.gjs pkgs.gtk4 pkgs.libadwaita pkgs.glib ];
 
-      mkGalley = pkgs: pkgs.buildGoModule {
+      mkGalley = pkgs: (pkgs.buildGoModule.override { go = go pkgs; }) {
         pname = "galley";
         inherit version;
         src = ./.;
@@ -99,7 +102,7 @@
         let pkgs = nixpkgs.legacyPackages.${system}; in
         {
           default = pkgs.mkShell {
-            packages = [ pkgs.go pkgs.gopls pkgs.gtk4 pkgs.dbus ] ++ windowInputs pkgs;
+            packages = [ (go pkgs) pkgs.gopls pkgs.gtk4 pkgs.dbus ] ++ windowInputs pkgs;
             nativeBuildInputs = [ pkgs.gobject-introspection ];
             CGO_ENABLED = "0";
           };
@@ -115,7 +118,7 @@
           inherit (self.packages.${system}) galley;
 
           gofmt = pkgs.runCommand "gofmt"
-            { nativeBuildInputs = [ pkgs.go ]; }
+            { nativeBuildInputs = [ (go pkgs) ]; }
             ''
               cd ${./.}
               unformatted=$(gofmt -l .)
@@ -214,7 +217,7 @@
           # programs went, and the test control stays behind.
           dist = pkgs.runCommand "galley-dist"
             {
-              nativeBuildInputs = [ pkgs.go pkgs.gjs pkgs.gobject-introspection ];
+              nativeBuildInputs = [ (go pkgs) pkgs.gjs pkgs.gobject-introspection ];
               buildInputs = windowInputs pkgs;
             }
             ''
