@@ -5,9 +5,33 @@ on:
     branches: [trunk]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Release this commit even if nothing in RELEASE_PATHS changed since the last release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
+  # The fast checks, with the toolchain mise.toml pins: gofmt, vet, the
+  # client's tests and shellcheck.
   check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - name: mise run check
+        run: mise run check
+
+  # The distro channel: the package, the window's own units under gjs, the
+  # end-to-end test on GTK's broadway backend (no display needed), the window
+  # following the desktop's dark style, accent and contrast, the home-manager
+  # module's units, shellcheck, and a tarball built by Nix's Go installed and
+  # uninstalled. On trunk, the package goes to danielbodart.cachix.org, and
+  # nothing else: not the checks' own closures.
+  nix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -17,50 +41,96 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      # The build and the client's tests, vet and gofmt, the window's own
-      # units under gjs, the end-to-end test on GTK's broadway backend (no
-      # display needed), the window following the desktop's dark style, accent
-      # and contrast, the home-manager module's units, shellcheck, and the
-      # release tarball installed and uninstalled.
+      - uses: cachix/cachix-action@v17
+        with:
+          name: danielbodart
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: true
+
       - name: nix flake check
         run: nix flake check --print-build-logs
 
-  # Every green push to trunk is a release: v$(scripts/version.sh), tagged on
-  # the commit, with a tarball per architecture for a system without Nix
-  # (see packaging/install.sh). Nix users take the flake, at trunk or at the
-  # tag. So is a run started on trunk by hand, or by the weekly flake.lock
-  # bump, whose push with GITHUB_TOKEN starts no workflow of itself.
+      - name: Push the package to Cachix
+        if: github.ref == 'refs/heads/trunk' && github.event_name != 'pull_request'
+        run: nix build .#galley --print-out-paths | cachix push danielbodart
+
+  # The upstream channel: the release tarballs, built by mise's Go, and this
+  # machine's installed as a system without Nix installs it, on the runner's
+  # Ubuntu with its own gjs, GTK 4 and libadwaita: the client's version, the
+  # units verified by systemd-analyze against the installed programs, and
+  # uninstalled again. The tarballs go on to the release.
+  dist:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 because the version's minor is the commit count and
+      # scripts/version.sh REFUSES a shallow clone.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v5
+      - name: mise run dist
+        run: mise run dist
+      - name: What the window needs
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends gjs gir1.2-gtk-4.0 gir1.2-adw-1
+      - name: mise run dist-check
+        run: mise run dist-check
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  # Whether this commit is a release: only if what the tarballs or the Go
+  # packages other modules import are made of (RELEASE_PATHS in mise.toml)
+  # changed since the last release tag, so a week where only flake.lock
+  # moved, or a change to the workflows or the README, releases nothing. A
+  # dispatch with `release` forces one.
+  due:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.due.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v5
+      - id: due
+        env:
+          FORCE: ${{ inputs.release }}
+        run: |
+          if [ "$FORCE" = true ]; then due=true; else due=$(mise run -q release-due); fi
+          echo "release=$due" >> "$GITHUB_OUTPUT"
+
+  # The release, v$(scripts/version.sh) -- the version dist built, the run
+  # number being the same -- tagged on the commit, once every
+  # channel's checks have passed: the tarballs, each signed by cosign keyless
+  # (a sigstore bundle beside it, naming this workflow), and SHA256SUMS. Nix
+  # users take the flake, at trunk or at the tag.
   release:
-    needs: [check]
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/trunk' && needs.check.result == 'success'
+    needs: [check, nix, dist, due]
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/trunk' && needs.due.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
-      # fetch-depth: 0 because the minor is the commit count and the script
-      # REFUSES a shallow clone; fetch-tags so the previous tag resolves when
-      # the notes are generated below.
+      # The history and the tags, for the notes.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+      - uses: jdx/mise-action@v5
 
-      # Go from the flake's own nixpkgs, so the release is built by the same
-      # Go as the checks. The client cross-compiles; the window is the same
-      # JavaScript for both.
-      - name: Build the tarballs
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Sign the tarballs
         run: |
-          V="$(./scripts/version.sh)"
-          echo "V=$V" >> "$GITHUB_ENV"
-          for arch in x86_64 aarch64; do
-            nix shell --inputs-from . nixpkgs#go -c ./scripts/dist.sh "$V" "$arch" dist
+          for f in dist/*.tar.gz; do
+            cosign sign-blob "$f" --bundle "$f.sigstore.json" --yes
           done
-          (cd dist && sha256sum ./*.tar.gz > SHA256SUMS)
 
       # Notes from the COMMITS since the last release. Trunk-based means direct
       # pushes and no pull requests, so GitHub's PR-based --generate-notes
@@ -70,6 +140,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          V="$(scripts/version.sh)"
           PREV="$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)"
           if [ -n "$PREV" ] && git rev-parse -q --verify "refs/tags/$PREV" >/dev/null; then
             git log "$PREV..HEAD" --pretty='- %s (%h)' > notes.md
@@ -77,4 +148,4 @@ jobs:
             { echo 'First automated release.'; echo; git log -1 --pretty='- %s (%h)'; } > notes.md
           fi
           gh release create "v$V" --title "v$V" --notes-file notes.md --target "$GITHUB_SHA" \
-            dist/*.tar.gz dist/SHA256SUMS
+            dist/*.tar.gz dist/*.sigstore.json dist/SHA256SUMS

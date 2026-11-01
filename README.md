@@ -49,6 +49,23 @@ One of each of the other dialogs, as the page on the right shows it:
 A file chooser's page says what it asks for, and its button opens GTK's own
 chooser; `--info` is laid out as `--warning` is, under an icon of its own.
 
+## Channels
+
+galley ships two ways:
+
+- **Release tarballs** for x86_64 and aarch64 (below, *Without Nix*): the
+  client, the window, its systemd user units and an installer, built by
+  **mise** with the Go `mise.toml` pins, signed by cosign keyless (a
+  `.sigstore.json` bundle beside each) and listed in `SHA256SUMS`.
+- **A Nix package and home-manager module** (below, *With Nix*), built by
+  **nixpkgs** (nixos-26.05, `go_1_27`, the same Go minor as mise's).
+
+Both are **updated** weekly, Sunday 21:23 UTC (`.github/workflows/update.yml`):
+the flake's inputs, mise's tools to their latest patch and any Go
+requirements, committed to `trunk` once every check passes. A release is cut
+when what the tarballs are made of changes (`RELEASE_PATHS` in `mise.toml`),
+never for flake.lock alone.
+
 ## Install
 
 ### With Nix
@@ -82,8 +99,10 @@ $ galley-daemon &
 $ galley --info --text="Hello"
 ```
 
-Every green build of `trunk` is a release, tagged `v0.N.M`, so a version can
-be pinned: `github:danielbodart/galley/v0.N.M`.
+A green build of `trunk` that changes what the tarballs are made of is a
+release, tagged `v0.N.M`, so a version can be pinned:
+`github:danielbodart/galley/v0.N.M`. The package's own version is
+`0-unstable-DATE`, the date of the commit it was built from.
 
 ### Without Nix
 
@@ -92,6 +111,15 @@ Each release carries a tarball for x86_64 and aarch64 with an installer:
 ```console
 $ curl -fsSL https://github.com/danielbodart/galley/releases/latest/download/galley-linux-$(uname -m).tar.gz | tar -xz
 $ ./galley-*/install.sh
+```
+
+To check a tarball came from this repository's CI:
+
+```console
+$ cosign verify-blob galley-linux-x86_64.tar.gz \
+    --bundle galley-linux-x86_64.tar.gz.sigstore.json \
+    --certificate-identity-regexp '^https://github.com/danielbodart/galley/' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
 It installs into `~/.local` (`--prefix=/usr/local`, as root, for everyone),
@@ -435,8 +463,9 @@ leave its socket unserved.
 ## Development
 
 ```console
-$ nix develop          # go, gjs, gtk4, libadwaita
-$ go test ./...
+$ mise run check       # gofmt, vet, the client's tests, shellcheck
+$ mise run build       # the client, into dist/
+$ nix develop          # gjs, gtk4, libadwaita, for the window's tests
 $ gjs -m tests/units.js
 $ gjs -m tests/appearance.js   # the window following the desktop's style
 $ GALLEY_E2E_DAEMON="gjs -m $PWD/daemon/main.js" \
@@ -446,7 +475,9 @@ $ nix flake check      # build, client tests, vet, gofmt, the window's units,
                        # appearance test, the home-manager module's units,
                        # shellcheck, and the release tarball installed
 $ scripts/version.sh   # MAJOR (./VERSION) . commit count . CI run number
-$ scripts/dist.sh 0.1.2 x86_64   # a release tarball, into dist/
+$ mise run dist        # the release tarballs and SHA256SUMS, into dist/
+$ mise run dist-check  # this machine's installed, verified and uninstalled
+                       # (needs gjs, GTK 4.12 and libadwaita 1.4)
 ```
 
 The end-to-end and appearance tests run the real window on broadway, which
