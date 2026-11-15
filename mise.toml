@@ -8,17 +8,20 @@ go = "1.27.3"
 shellcheck = "0.11.0"
 cosign = "3.1.4"
 
-# What the release tarballs and the Go packages other modules import are made
-# of. A change to any of these since the last release tag is released (see
-# release-due); the workflows, docs, flake.nix, flake.lock and nix/ are not.
-# The units and the desktop file the tarballs ship are in packaging/, which
-# the flake's package takes them from too.
+# What a release is made of: the tarballs, the Go packages other modules
+# import, and, for Nix, how the flake installs a release's tarball
+# (flake.nix) and the home-manager module (nix/home.nix), which a Nix user
+# gets only by pinning a release tag, trunk having no package. A change to
+# any of these since the last release is released (see release-due); the
+# workflows, docs, flake.lock and the checks are not. The units and the
+# desktop file the tarballs ship are in packaging/, which the flake's
+# package takes from the tarball.
 [env]
-RELEASE_PATHS = "cmd internal services wire daemon packaging scripts/dist.sh go.mod go.sum mise.toml VERSION"
+RELEASE_PATHS = "cmd internal services wire daemon packaging scripts/dist.sh go.mod go.sum mise.toml VERSION flake.nix nix/home.nix"
 
 [tasks.check]
-description = "gofmt, vet, the client's tests and shellcheck"
-depends = ["lint", "test", "shellcheck"]
+description = "gofmt, vet, the client's tests, shellcheck and the release scripts' tests"
+depends = ["lint", "test", "shellcheck", "scripts-test"]
 
 [tasks.lint]
 description = "gofmt and vet"
@@ -29,7 +32,7 @@ CGO_ENABLED=0 go vet ./...
 '''
 
 [tasks.test]
-description = "The client's tests (the end-to-end tests run in nix flake check, on broadway)"
+description = "The client's tests (the end-to-end tests run in the flake's checks, on broadway: mise run nix-check)"
 run = "CGO_ENABLED=0 go test -count=1 ./..."
 
 [tasks.shellcheck]
@@ -57,10 +60,38 @@ for arch in x86_64 aarch64; do scripts/dist.sh "$version" "$arch" dist; done
 description = "This machine's tarball, as dist made it, installed into a prefix, its units verified, and uninstalled"
 run = "scripts/dist-check.sh"
 
+# The last release is its tag's parent (scripts/last-release.sh), since a
+# release's tag is a child commit holding nix/release.json.
 [tasks.release-due]
-description = "Print true and succeed if anything in RELEASE_PATHS changed since the last release tag (or there is none), else print false and fail"
+description = "Print true and succeed if anything in RELEASE_PATHS changed since the last release (or there is none), else print false and fail"
+run = "scripts/release-due.sh"
+
+[tasks.scripts-test]
+description = "The release scripts' own tests, against a throwaway repository and a known SHA256SUMS"
+run = ["scripts/release-due-test.sh", "scripts/release-json-test.sh"]
+
+# The flake's package is a release's tarball (flake.nix), so trunk has none.
+# These make this machine's tarballs, as dist does, the flake's release for
+# the one command (scripts/nix-local-release.sh), then take the staged
+# nix/release.json out again: it must never be committed to trunk.
+[tasks.nix-check]
+description = "nix flake check with the package's checks too, on tarballs built here (needs Nix)"
+depends = ["dist"]
 run = '''
-set -f
-last=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null) || { echo true; exit 0; }
-if [ -n "$(git diff --name-only "$last" HEAD -- $RELEASE_PATHS)" ]; then echo true; else echo false; exit 1; fi
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'git rm -q --cached --ignore-unmatch nix/release.json; rm -f nix/release.json' EXIT
+scripts/nix-local-release.sh "$(scripts/dist-version.sh dist)" dist >/dev/null
+nix flake check --print-build-logs
+'''
+
+[tasks.nix-build]
+description = "The flake's package, from tarballs built here, as ./result (needs Nix)"
+depends = ["dist"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'git rm -q --cached --ignore-unmatch nix/release.json; rm -f nix/release.json' EXIT
+scripts/nix-local-release.sh "$(scripts/dist-version.sh dist)" dist >/dev/null
+nix build .#galley
 '''

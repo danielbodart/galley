@@ -61,9 +61,10 @@ chooser; `--info` is laid out as `--warning` is, under an icon of its own.
 - **Nix**: flake input `github:danielbodart/galley/v<version>` with
   `inputs.nixpkgs.follows = "nixpkgs"`; `packages.default`, and
   `homeModules.default` (`services.galley`, a home-manager module: the window
-  is a user service). Built by nixpkgs (nixos-26.05, `go_1_27`, the same Go
-  minor as mise's) and cached at `danielbodart.cachix.org` (below, *With
-  Nix*).
+  is a user service). The package is that release's own tarball, fetched by
+  the hash in the tag's `nix/release.json`, its client byte for byte the
+  one `SHA256SUMS` lists and its window run by nixpkgs' gjs, GTK 4 and
+  libadwaita; nothing is built from source (below, *With Nix*).
 - Not shipped: Docker - galley is a window on the user's desktop session,
   which a container has no part in.
 - Not shipped: loose per-architecture binaries - the client alone is useless
@@ -73,23 +74,30 @@ Updated weekly (Sunday 21:23 UTC): the flake's inputs, mise's tools to the
 latest patch of their minor and any Go requirements, committed to `trunk`
 once every check passes. A release is cut when the Go source, the window, the
 units, the desktop file, the installer, `scripts/dist.sh`, `go.mod`,
-`mise.toml` or `VERSION` changed since the last release (`RELEASE_PATHS` in
-`mise.toml`), never for flake.lock alone.
+`mise.toml`, `VERSION`, `flake.nix` or the home-manager module changed since
+the last release (`RELEASE_PATHS` in `mise.toml`), never for flake.lock
+alone.
 
 ## Install
 
 ### With Nix
 
-Add the flake as an input:
+Add the flake as an input, pinned to a release tag:
 
 ```nix
 {
   inputs.galley = {
-    url = "github:danielbodart/galley";
+    url = "github:danielbodart/galley/v0.N.M";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 }
 ```
+
+Pin a tag, always: `trunk` has no package. A release's tag is a commit of
+its own, a child of the released `trunk` commit, that adds
+`nix/release.json`, the release's version and each tarball's URL and hash,
+and the package is that tarball fetched and installed, not a build from
+source.
 
 With home-manager, the module installs galley and the socket that starts
 its window on the first question:
@@ -107,15 +115,13 @@ it carries in `share/systemd/user`. Or try it once, starting the window by
 hand:
 
 ```console
-$ nix shell github:danielbodart/galley
+$ nix shell github:danielbodart/galley/v0.N.M
 $ galley-daemon &
 $ galley --info --text="Hello"
 ```
 
-A green build of `trunk` that changes what the tarballs are made of is a
-release, tagged `v0.N.M`, so a version can be pinned:
-`github:danielbodart/galley/v0.N.M`. The package's own version is
-`0-unstable-DATE`, the date of the commit it was built from.
+A green build of `trunk` that changes what a release is made of is a
+release, tagged `v0.N.M`, and the package's version is the release's.
 
 ### Without Nix
 
@@ -483,15 +489,23 @@ $ gjs -m tests/units.js
 $ gjs -m tests/appearance.js   # the window following the desktop's style
 $ GALLEY_E2E_DAEMON="gjs -m $PWD/daemon/main.js" \
   GALLEY_E2E_BROADWAYD=$(command -v gtk4-broadwayd) go test -v ./tests/
-$ nix flake check      # build, client tests, vet, gofmt, the window's units,
-                       # the end-to-end test on GTK's broadway backend, the
-                       # appearance test, the home-manager module's units,
-                       # shellcheck, and the release tarball installed
 $ scripts/version.sh   # MAJOR (./VERSION) . commit count . CI run number
 $ mise run dist        # the release tarballs and SHA256SUMS, into dist/
 $ mise run dist-check  # this machine's installed, verified and uninstalled
                        # (needs gjs, GTK 4.12 and libadwaita 1.4)
+$ nix flake check      # the window's units, the appearance test, shellcheck
+$ mise run nix-check   # all that, and on tarballs built here as the
+                       # flake's release: the package, its wrapper, the
+                       # end-to-end test on GTK's broadway backend and the
+                       # home-manager module's units
+$ mise run nix-build   # the package, from tarballs built here, as ./result
 ```
+
+The flake does not build galley: its package is a release's tarball. On
+`trunk` it has none, so `mise run nix-check` and `nix-build` make the
+tarballs `mise run dist` builds the flake's release for the one command
+(`scripts/nix-local-release.sh`, as CI's nix job does with its own run's),
+then take the staged `nix/release.json` out again.
 
 The end-to-end and appearance tests run the real window on broadway, which
 needs no display, and never touch the desktop they run on: they drop

@@ -5,7 +5,9 @@
 //
 // It runs when $GALLEY_E2E_DAEMON names the command that starts the window
 // and $GALLEY_E2E_BROADWAYD names gtk4-broadwayd, as the flake's end-to-end
-// check sets them; otherwise it skips. By hand, from the dev shell:
+// check sets them; otherwise it skips. The client is built from this
+// checkout unless $GALLEY_E2E_CLIENT names one, as the flake's check names
+// the release's. By hand, from the dev shell:
 //
 //	GALLEY_E2E_DAEMON="gjs -m $PWD/daemon/main.js" \
 //	GALLEY_E2E_BROADWAYD=$(command -v gtk4-broadwayd) go test -v ./tests/
@@ -61,11 +63,16 @@ func setUp(daemon, broadwayd string, m *testing.M) (int, error) {
 	os.Chmod(dir, 0o700)
 	runtimeDir = dir
 
-	client = filepath.Join(dir, "client")
-	build := exec.Command("go", "build", "-o", client, "../cmd/galley")
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
-		return 0, fmt.Errorf("building the client: %w", err)
+	// The client under test: $GALLEY_E2E_CLIENT's, as the flake's check
+	// names the release's own, or else one built from this checkout.
+	client = os.Getenv("GALLEY_E2E_CLIENT")
+	if client == "" {
+		client = filepath.Join(dir, "client")
+		build := exec.Command("go", "build", "-o", client, "../cmd/galley")
+		build.Stderr = os.Stderr
+		if err := build.Run(); err != nil {
+			return 0, fmt.Errorf("building the client: %w", err)
+		}
 	}
 
 	display := fmt.Sprintf(":%d", 40+os.Getpid()%50)

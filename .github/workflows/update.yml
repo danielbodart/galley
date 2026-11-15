@@ -1,17 +1,17 @@
 # The weekly update: every dependency galley has, moved in the one window a
 # week all of danielbodart's repos share, Sunday 21:23 UTC. nix-config
-# follows at 23:23 on the same nixos-26.05, so the package this builds and
-# pushes is the derivation nix-config builds.
+# follows at 23:23 on the same nixos-26.05.
 #
 # What moves: the flake's inputs (nix flake update); mise.toml's tools, each
 # to the latest patch of its pinned minor (a minor moves by hand, with go_1_NN
-# in flake.nix); and the Go requirements (go get -u, go mod tidy, and the
-# flake's vendorHash with them), of which galley has none today.
+# in flake.nix); and the Go requirements (go get -u, go mod tidy), of which
+# galley has none today. The flake builds nothing from source (its package
+# is a release's tarball), so there is no vendorHash to move with them.
 #
 # The result is committed straight to trunk, as github-actions[bot], only if
-# everything CI runs passes with it -- mise run check, nix flake check, and
-# the tarballs built and installed -- never as a pull request. The package
-# then goes to danielbodart.cachix.org. A push with GITHUB_TOKEN starts no
+# everything CI runs passes with it -- mise run check, the tarballs built
+# and installed, and nix flake check on them -- never as a pull request. A
+# push with GITHUB_TOKEN starts no
 # workflow, so if what moved is something the tarballs are made of
 # (RELEASE_PATHS in mise.toml: Go or a requirement), this starts CI on the
 # pushed commit with release=true; a week where only flake.lock moved
@@ -51,13 +51,6 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      # Reads the cache; what is pushed is only the package, below.
-      - uses: cachix/cachix-action@v17
-        with:
-          name: danielbodart
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          skipPush: true
-
       - uses: jdx/mise-action@v5
 
       - name: Move the flake's inputs
@@ -77,8 +70,6 @@ jobs:
             done
           mise install
 
-      # vendorHash = null while there are no requirements; once there are,
-      # the hash Nix reports for a fake one is the new one.
       - name: Move the Go requirements
         run: |
           reqs() { go mod edit -json | jq -r '.Require[]? | .Path + " " + .Version' | sort; }
@@ -86,12 +77,6 @@ jobs:
           go get -u ./...
           go mod tidy
           comm -13 <(echo "$before") <(reqs) | cut -d' ' -f1 >> "$RUNNER_TEMP/moved"
-          if ! git diff --quiet -- go.mod go.sum && old=$(grep -oE 'vendorHash = "sha256-[^"]+"' flake.nix | cut -d'"' -f2); then
-            fake=sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-            sed -i "s|$old|$fake|" flake.nix
-            new=$(nix build .#galley 2>&1 | grep -oE 'got: +sha256-[^ ]+' | awk '{print $2}' || true)
-            sed -i "s|$fake|${new:?Nix reported no vendorHash}|" flake.nix
-          fi
 
       - name: What moved
         id: moved
@@ -105,10 +90,6 @@ jobs:
         if: steps.moved.outputs.moved
         run: mise run check
 
-      - name: nix flake check
-        if: steps.moved.outputs.moved
-        run: nix flake check --print-build-logs
-
       - name: mise run dist
         if: steps.moved.outputs.moved
         run: mise run dist
@@ -118,6 +99,20 @@ jobs:
         run: |
           sudo apt-get update -q && sudo apt-get install -y --no-install-recommends gjs gir1.2-gtk-4.0 gir1.2-adw-1
           mise run dist-check
+
+      # As CI's nix job: the tarballs just built made the flake's release
+      # (scripts/nix-local-release.sh, which stages a nix/release.json that
+      # the commit below must not take), then every check, and the other
+      # system evaluated.
+      - name: nix flake check
+        if: steps.moved.outputs.moved
+        run: |
+          nix flake check --no-build --all-systems
+          scripts/nix-local-release.sh "$(scripts/dist-version.sh dist)" dist
+          nix flake check --print-build-logs
+          nix flake check --no-build --all-systems
+          git rm -q --cached nix/release.json
+          rm -f nix/release.json
 
       - name: Commit and push
         if: steps.moved.outputs.moved
@@ -130,10 +125,6 @@ jobs:
           git commit -qm "Weekly update: $MOVED"
           git pull -q --rebase origin trunk
           git push -q origin HEAD:trunk
-
-      - name: Push the package to Cachix
-        if: steps.moved.outputs.moved
-        run: nix build .#galley --print-out-paths | cachix push danielbodart
 
       - name: Release, if what moved is released
         if: steps.moved.outputs.moved

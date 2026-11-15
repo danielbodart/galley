@@ -5,54 +5,71 @@
 
   outputs = { self, nixpkgs }:
     let
+      lib = nixpkgs.lib;
       systems = [ "x86_64-linux" "aarch64-linux" ];
-      forAllSystems = nixpkgs.lib.genAttrs systems;
+      forAllSystems = lib.genAttrs systems;
 
-      # A build from a commit, named as nixpkgs names one: 0-unstable-DATE,
-      # the date of the commit, which a github: ref gives as well as a git+
-      # one. It never pretends to be a release; the release tarballs carry
-      # the release's version (scripts/version.sh).
-      date = builtins.substring 0 8 (self.lastModifiedDate or "19700101");
-      version = "0-unstable-${builtins.substring 0 4 date}-${builtins.substring 4 2 date}-${builtins.substring 6 2 date}";
-
-      # Go at the minor mise.toml pins, so the tarballs and the package are
-      # built by the same Go.
+      # Go at the minor mise.toml pins, for the dev shell and the end-to-end
+      # check's test binary. The client itself is never built here (below).
       go = pkgs: pkgs.go_1_27;
 
       # What the window is built of: GJS, and the libraries it reaches
       # through GObject introspection.
       windowInputs = pkgs: [ pkgs.gjs pkgs.gtk4 pkgs.libadwaita pkgs.glib ];
 
-      mkGalley = pkgs: (pkgs.buildGoModule.override { go = go pkgs; }) {
+      # THE PACKAGE IS THE RELEASE TARBALL, not a build from source (Dan,
+      # 2026-11-15): the client is built once, by mise's Go in CI's dist
+      # job, installed and checked there, signed and published, and building
+      # it again here only made a second client that was not the one
+      # released. So a release's tag is a commit of its own, a child of the
+      # released trunk commit, that adds nix/release.json: the version, and
+      # for each system the tarball's URL and hash (scripts/release-json.sh
+      # writes it; ci.yml's release job commits and tags it). A flake
+      # fetched as github:danielbodart/galley/v<V> cannot see its tag, only
+      # its commit, which is why the version is in the file.
+      #
+      # On trunk there is no such file and no package: pin a release tag.
+      # Absent rather than an error, so `nix flake check` and the dev shell
+      # still work on trunk.
+      releaseFile = ./nix/release.json;
+      release =
+        if builtins.pathExists releaseFile
+        then lib.importJSON releaseFile
+        else null;
+
+      # The tarball installed as the flake's package always was: the client
+      # byte for byte the release's (static, so neither stripped nor
+      # patched, which would make it differ from the file the tarball's
+      # SHA256SUMS line vouches for), and the window, which is JavaScript,
+      # run by nixpkgs' gjs with GTK 4 and libadwaita through wrapGAppsHook4
+      # rather than by the system's gjs as the tarball's own galley-daemon
+      # is.
+      mkGalley = pkgs: { version, tarball }: pkgs.stdenvNoCC.mkDerivation {
         pname = "galley";
         inherit version;
-        src = ./.;
-
-        # No dependencies beyond the standard library: the client is the
-        # thin end, and a password passes through it.
-        vendorHash = null;
-
-        # Static, so the client starts in a millisecond or two: it runs once
-        # per question, and a sudo prompt waits on it.
-        env.CGO_ENABLED = 0;
-        ldflags = [ "-s" "-w" "-X" "main.version=${version}" ];
-        subPackages = [ "cmd/galley" ];
+        src = tarball;
+        # dist.sh lays the tarball out as it installs, under galley-VERSION/.
+        sourceRoot = "galley-${version}";
+        dontConfigure = true;
+        dontBuild = true;
 
         nativeBuildInputs = [ pkgs.wrapGAppsHook4 pkgs.gobject-introspection ];
         buildInputs = windowInputs pkgs;
         # Only the window is wrapped: the client needs none of GTK, and a
         # wrapper script would cost it a shell's start.
         dontWrapGApps = true;
+        dontStrip = true;
+        dontPatchELF = true;
 
-        postInstall = ''
-          # The window. test-control.js is not installed: it is how the
-          # end-to-end check presses keys, and a window without it has no way
-          # to be answered but a person.
-          mkdir -p $out/share/galley
-          for f in daemon/*.js; do
-            [ "$(basename "$f")" = test-control.js ] && continue
-            install -m644 "$f" $out/share/galley/
-          done
+        installPhase = ''
+          runHook preInstall
+
+          install -Dm0755 bin/galley $out/bin/galley
+
+          # The window, as the tarball has it: without the test control,
+          # which dist.sh leaves out.
+          install -d $out/share/galley
+          install -m644 share/galley/*.js $out/share/galley/
           cat > $out/bin/galley-daemon <<EOF
           #!${pkgs.runtimeShell}
           exec ${pkgs.gjs}/bin/gjs -m $out/share/galley/main.js "\$@"
@@ -60,40 +77,51 @@
           chmod +x $out/bin/galley-daemon
 
           # Its desktop file, which GNOME needs to show its notifications.
-          mkdir -p $out/share/applications
-          substitute packaging/io.github.danielbodart.Galley.desktop \
+          install -d $out/share/applications
+          substitute share/applications/io.github.danielbodart.Galley.desktop \
             $out/share/applications/io.github.danielbodart.Galley.desktop \
             --replace-fail @galley@ $out/bin/galley
 
           # The user units, for a system without the home-manager module.
-          mkdir -p $out/share/systemd/user
-          install -m644 packaging/galley.socket $out/share/systemd/user/galley.socket
-          substitute packaging/galley.service $out/share/systemd/user/galley.service \
+          install -Dm644 share/systemd/user/galley.socket $out/share/systemd/user/galley.socket
+          substitute share/systemd/user/galley.service $out/share/systemd/user/galley.service \
             --replace-fail @daemon@ $out/bin/galley-daemon
+
+          runHook postInstall
         '';
 
         postFixup = ''
           wrapGApp $out/bin/galley-daemon
         '';
 
-        doCheck = true;
-
         meta = {
           description = "A zenity drop-in whose dialogs stack in one window";
           homepage = "https://github.com/danielbodart/galley";
-          license = nixpkgs.lib.licenses.mit;
+          license = lib.licenses.mit;
           mainProgram = "galley";
-          platforms = nixpkgs.lib.platforms.linux;
+          # The two the release ships, as release.json lists them.
+          platforms = if release == null then [ ] else builtins.attrNames release.assets;
+          # The client is the release's binary; the window is its source.
+          sourceProvenance = [ lib.sourceTypes.binaryNativeCode lib.sourceTypes.fromSource ];
         };
       };
+
+      # The release's package for each system it has a tarball for.
+      releasePackages =
+        lib.mapAttrs
+          (system: asset:
+            let
+              pkgs = nixpkgs.legacyPackages.${system};
+              galley = mkGalley pkgs {
+                inherit (release) version;
+                tarball = pkgs.fetchurl { inherit (asset) url hash; };
+              };
+            in
+            { inherit galley; default = galley; })
+          release.assets;
     in
     {
-      packages = forAllSystems (system:
-        let pkgs = nixpkgs.legacyPackages.${system}; in
-        rec {
-          galley = mkGalley pkgs;
-          default = galley;
-        });
+      packages = if release == null then { } else releasePackages;
 
       # The window as a socket-activated user service. See nix/home.nix.
       homeModules.default = import ./nix/home.nix self;
@@ -108,37 +136,20 @@
           };
         });
 
+      # What needs Nix to check. gofmt, vet and the client's tests are mise
+      # run check's, and the tarball installed on a system without Nix is
+      # CI's dist job's (mise run dist-check). The checks of the package --
+      # it, its wrapper, the end-to-end test, the home-manager module --
+      # exist where nix/release.json does: on a release tag, and in CI's nix
+      # job, which writes one for the tarballs its own run built
+      # (scripts/nix-local-release.sh; mise run nix-check does the same
+      # here).
       checks = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
           pkg = self.packages.${system}.galley;
         in
         {
-          # The build, which is also the client's tests.
-          inherit (self.packages.${system}) galley;
-
-          gofmt = pkgs.runCommand "gofmt"
-            { nativeBuildInputs = [ (go pkgs) ]; }
-            ''
-              cd ${./.}
-              unformatted=$(gofmt -l .)
-              if [ -n "$unformatted" ]; then
-                echo "not gofmt'd:" >&2
-                echo "$unformatted" >&2
-                exit 1
-              fi
-              touch $out
-            '';
-
-          govet = pkg.overrideAttrs (_: {
-            pname = "galley-vet";
-            checkPhase = ''
-              runHook preCheck
-              go vet ./...
-              runHook postCheck
-            '';
-          });
-
           # The window's own logic -- the queue's order and the sanitising of
           # markup -- under plain gjs, with no display.
           window-units = pkgs.runCommand "galley-window-units"
@@ -157,9 +168,7 @@
           # The window follows the desktop's dark style, accent colour and
           # high contrast, at start and as they change while it is open, by
           # the settings portal and by GSettings: the real window on
-          # broadway and a private session bus, with a stand-in portal. And
-          # the package's window finds the desktop's settings: its wrapper
-          # carries the schemas and dconf's GSettings backend.
+          # broadway and a private session bus, with a stand-in portal.
           appearance = pkgs.runCommand "galley-appearance"
             {
               nativeBuildInputs = [ pkgs.gjs pkgs.gobject-introspection pkgs.gtk4 pkgs.dbus ];
@@ -170,38 +179,8 @@
               export HOME=$TMPDIR
               cd ${./.}
               gjs -m tests/appearance.js
-              for want in gsettings-desktop-schemas dconf; do
-                grep -q "$want" ${pkg}/bin/galley-daemon || {
-                  echo "galley-daemon's wrapper has no $want" >&2
-                  exit 1
-                }
-              done
               touch $out
             '';
-
-          # The client against the real window, drawn by GTK's broadway
-          # backend so there is no display to need: every mode's exit code
-          # and output, stacking, withdrawal and the keys, pressed through a
-          # test-only control the package does not ship.
-          end-to-end = pkg.overrideAttrs (old: {
-            pname = "galley-end-to-end";
-            nativeCheckInputs = (old.nativeCheckInputs or [ ]) ++ [ pkgs.gtk4 pkgs.gjs ];
-            preCheck = ''
-              export GALLEY_E2E_DAEMON="${pkgs.gjs}/bin/gjs -m $PWD/daemon/main.js"
-              export GALLEY_E2E_BROADWAYD=${pkgs.gtk4}/bin/gtk4-broadwayd
-              export HOME=$TMPDIR
-              # GTK's own schemas, as the package's wrapper gives the window:
-              # the colour chooser keeps its custom colours in GSettings, and
-              # GLib aborts on a schema it cannot find.
-              export XDG_DATA_DIRS=${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}
-              export GSETTINGS_BACKEND=memory
-            '';
-            checkPhase = ''
-              runHook preCheck
-              go test -count=1 -v ./tests/
-              runHook postCheck
-            '';
-          });
 
           shellcheck = pkgs.runCommand "galley-shellcheck"
             { nativeBuildInputs = [ pkgs.shellcheck ]; }
@@ -210,30 +189,44 @@
               shellcheck scripts/*.sh packaging/install.sh packaging/galley-daemon
               touch $out
             '';
+        } // lib.optionalAttrs (self.packages ? ${system}) {
+          galley = pkg;
 
-          # The release tarball for a system without Nix, as CI makes it,
-          # installed into a prefix and taken out again: the client says the
-          # version it was given, the units and desktop file name where the
-          # programs went, and the test control stays behind.
-          dist = pkgs.runCommand "galley-dist"
+          # The package's window finds the desktop's settings, as the
+          # appearance check's does: its wrapper carries the schemas and
+          # dconf's GSettings backend.
+          wrapper = pkgs.runCommand "galley-wrapper" { } ''
+            for want in gsettings-desktop-schemas dconf; do
+              grep -q "$want" ${pkg}/bin/galley-daemon || {
+                echo "galley-daemon's wrapper has no $want" >&2
+                exit 1
+              }
+            done
+            touch $out
+          '';
+
+          # The release's client against the real window, drawn by GTK's
+          # broadway backend so there is no display to need: every mode's
+          # exit code and output, stacking, withdrawal and the keys, pressed
+          # through a test-only control the package does not ship. Go builds
+          # the tests, not the client: GALLEY_E2E_CLIENT is the package's.
+          end-to-end = pkgs.runCommand "galley-end-to-end"
             {
-              nativeBuildInputs = [ (go pkgs) pkgs.gjs pkgs.gobject-introspection ];
+              nativeBuildInputs = [ (go pkgs) pkgs.gtk4 pkgs.gjs pkgs.gobject-introspection ];
               buildInputs = windowInputs pkgs;
             }
             ''
-              export HOME=$TMPDIR GOCACHE=$TMPDIR/go-cache GOPROXY=off
-              cp -r ${./.} src && chmod -R u+w src
-              arch=${pkgs.stdenv.hostPlatform.uname.processor}
-              bash src/scripts/dist.sh 7.8.9 "$arch" out
-              tar -xzf out/galley-linux-$arch.tar.gz
-              p=$TMPDIR/prefix
-              sh galley-7.8.9/install.sh --prefix=$p --no-systemd
-              [ "$($p/bin/galley --version)" = 7.8.9 ]
-              grep -qx "ExecStart=$p/bin/galley-daemon" $p/share/systemd/user/galley.service
-              grep -qx "Exec=$p/bin/galley --show" $p/share/applications/io.github.danielbodart.Galley.desktop
-              [ -f $p/share/galley/main.js ] && [ ! -e $p/share/galley/test-control.js ]
-              sh galley-7.8.9/install.sh --prefix=$p --no-systemd --uninstall
-              [ -z "$(find $p -type f)" ]
+              export HOME=$TMPDIR GOCACHE=$TMPDIR/go-cache GOPROXY=off GOTOOLCHAIN=local CGO_ENABLED=0
+              cp -r ${./.} src && chmod -R u+w src && cd src
+              export GALLEY_E2E_CLIENT=${pkg}/bin/galley
+              export GALLEY_E2E_DAEMON="${pkgs.gjs}/bin/gjs -m $PWD/daemon/main.js"
+              export GALLEY_E2E_BROADWAYD=${pkgs.gtk4}/bin/gtk4-broadwayd
+              # GTK's own schemas, as the package's wrapper gives the window:
+              # the colour chooser keeps its custom colours in GSettings, and
+              # GLib aborts on a schema it cannot find.
+              export XDG_DATA_DIRS=${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}''${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}
+              export GSETTINGS_BACKEND=memory
+              go test -count=1 -v ./tests/
               touch $out
             '';
 
@@ -241,7 +234,7 @@
           # private runtime directory, the service running the window.
           home-module =
             let
-              eval = import ./nix/home-eval.nix { inherit pkgs self; lib = nixpkgs.lib; };
+              eval = import ./nix/home-eval.nix { inherit pkgs self lib; };
             in
             pkgs.writeText "galley-home-module" (builtins.toJSON eval);
         });

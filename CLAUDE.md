@@ -11,8 +11,10 @@ reads the widget tree over AT-SPI and returns screenshots as images.
 Broadway gives you none of that: GTK 4 has no way to synthesise a key event,
 which is why the tests below have a test control.
 
-Build the checkout first: `nix build .#galley`. Then start a session whose
-command is a script along these lines:
+Build the checkout first: `mise run nix-build` (the flake's package is a
+release's tarball and trunk has none, so this builds the tarballs and makes
+them the flake's release for the one build, leaving `./result`). Then start
+a session whose command is a script along these lines:
 
 ```sh
 echo '{"accessibility": true}' > /tmp/galley-a11y.json
@@ -39,6 +41,7 @@ wait
 ## Tests stay on broadway
 
 The end-to-end and appearance tests run on broadway. Don't move them to
-WayDriver. They run inside `nix flake check`'s sandbox, where there is no
+WayDriver. They run inside `nix flake check`'s sandbox (`mise run
+nix-check` for the end-to-end test, which needs the package), where there is no
 mutter, PipeWire or AT-SPI. The README's Development section has the
 commands.
