@@ -1,0 +1,13 @@
+{
+  "version": "0.42.31",
+  "assets": {
+    "x86_64-linux": {
+      "url": "https://github.com/danielbodart/galley/releases/download/v0.42.31/galley-linux-x86_64.tar.gz",
+      "hash": "sha256-l4AFWK6M8tbHw+Vj6+wIxh0hlTn55bYvkWp1izzUF5k="
+    },
+    "aarch64-linux": {
+      "url": "https://github.com/danielbodart/galley/releases/download/v0.42.31/galley-linux-aarch64.tar.gz",
+      "hash": "sha256-FUlksqcFPcUikdkb0G19GK3j0mYtBXZ+I435XG2KSLI="
+    }
+  }
+}
